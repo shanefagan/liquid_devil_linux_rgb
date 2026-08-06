@@ -35,6 +35,12 @@ To make `i2c-dev` load automatically on boot:
 echo "i2c-dev" | sudo tee /etc/modules-load.d/i2c-dev.conf
 ```
 
+Ensure your user is in the `i2c` group for non-root access:
+
+```bash
+sudo usermod -aG i2c $USER
+```
+
 ### Install Package
 
 Clone the repository and install:
@@ -127,13 +133,9 @@ sudo systemctl enable --now liquid-devil-rgb.service
 
 ---
 
-## OpenRGB Note
+## OpenRGB Coexistence
 
-OpenRGB does not currently support the 7900 XTX Liquid Devil V2 controller out of the box. Ensure OpenRGB is stopped before running `liquid-devil-rgb` to prevent I2C bus contention:
-
-```bash
-killall openrgb
-```
+OpenRGB does not currently support the 7900 XTX Liquid Devil V2 controller. Because OpenRGB skips the unrecognized controller at address `0x22` after its initial startup scan, `liquid-devil-rgb` and OpenRGB can run side-by-side without issues (e.g., OpenRGB managing your RAM/motherboard while `liquid-devil-rgb` controls your GPU).
 
 ---
 
