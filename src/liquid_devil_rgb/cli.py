@@ -14,13 +14,14 @@ import struct
 import sys
 import threading
 import time
-from typing import TYPE_CHECKING, Self
+from typing import TYPE_CHECKING, Any, Self
 
 import click
 
 # Attempt smbus2 import with transparent stdlib ctypes fallback
 try:
     from smbus2 import SMBus, i2c_msg
+
     HAS_SMBUS2 = True
 except ImportError:
     import ctypes
@@ -42,6 +43,7 @@ except ImportError:
             ("msgs", ctypes.POINTER(I2CMsg)),
             ("nmsgs", ctypes.c_uint32),
         ]
+
 
 if TYPE_CHECKING:
     from types import TracebackType
@@ -79,9 +81,7 @@ def find_oem_i2c_bus() -> str:
 class LiquidDevilRGB:
     """Hardware controller interface for PowerColor RX 7900 XTX Liquid Devil RGB lighting."""
 
-    def __init__(
-        self, bus_path: str | None = None, addr: int = DEFAULT_ADDR
-    ) -> None:
+    def __init__(self, bus_path: str | None = None, addr: int = DEFAULT_ADDR) -> None:
         """Initialize the RGB controller instance.
 
         Args:
@@ -306,13 +306,16 @@ def parse_color_args(
                 )
             except ValueError:
                 pass
-        raise click.BadParameter(f"Invalid hex color '{hex_val}'. Must be RRGGBB or #RRGGBB.")
+        raise click.BadParameter(
+            f"Invalid hex color '{hex_val}'. Must be RRGGBB or #RRGGBB."
+        )
     if r is not None and g is not None and b is not None:
         return r, g, b
     raise click.UsageError("Specify R G B values (0-255) or --hex color.")
 
 
 # --- OpenRGB SDK Client Sync Module ---
+
 
 def run_openrgb_sync_client(
     host: str = "127.0.0.1",
@@ -326,7 +329,7 @@ def run_openrgb_sync_client(
     print("PowerColor RX 7900 XTX Liquid Devil - OpenRGB Sync Client")
     print(f"Connecting to OpenRGB Server at {host}:{port}")
     print(f"Target Device Index: {device_idx}")
-    print(f"Sync Rate: ~{fps} FPS ({interval*1000:.1f}ms interval)")
+    print(f"Sync Rate: ~{fps} FPS ({interval * 1000:.1f}ms interval)")
     print("Press Ctrl+C to stop sync daemon.\n")
 
     with LiquidDevilRGB(bus_path=bus_path) as dev:
@@ -340,13 +343,25 @@ def run_openrgb_sync_client(
 
                 name_bytes = b"Liquid Devil GPU Sync\x00"
                 name_payload = struct.pack("<H", len(name_bytes)) + name_bytes
-                hdr = struct.pack("<4sIII", b"ORGB", 0, NET_PACKET_TYPE_SET_CLIENT_NAME, len(name_payload))
+                hdr = struct.pack(
+                    "<4sIII",
+                    b"ORGB",
+                    0,
+                    NET_PACKET_TYPE_SET_CLIENT_NAME,
+                    len(name_payload),
+                )
                 s.sendall(hdr + name_payload)
 
                 print(f"Connected to OpenRGB Server at {host}:{port}")
 
                 while True:
-                    req_hdr = struct.pack("<4sIII", b"ORGB", device_idx, NET_PACKET_TYPE_REQUEST_CONTROLLER_DATA, 4)
+                    req_hdr = struct.pack(
+                        "<4sIII",
+                        b"ORGB",
+                        device_idx,
+                        NET_PACKET_TYPE_REQUEST_CONTROLLER_DATA,
+                        4,
+                    )
                     s.sendall(req_hdr + struct.pack("<I", 3))
 
                     resp_hdr = s.recv(16)
@@ -373,7 +388,10 @@ def run_openrgb_sync_client(
                     time.sleep(interval)
 
             except (TimeoutError, ConnectionResetError, BrokenPipeError, OSError) as e:
-                print(f"Disconnected from OpenRGB server ({e}). Retrying in 3 seconds...", file=sys.stderr)
+                print(
+                    f"Disconnected from OpenRGB server ({e}). Retrying in 3 seconds...",
+                    file=sys.stderr,
+                )
                 time.sleep(3.0)
             except KeyboardInterrupt:
                 print("\nStopping OpenRGB Sync daemon.")
@@ -382,63 +400,63 @@ def run_openrgb_sync_client(
 
 # --- OpenRGB SDK Server Helpers ---
 
-def pack_string(s: str) -> bytes:
-    """Pack string with 16-bit length prefix as expected by OpenRGB SDK."""
-    encoded = s.encode("utf-8") + b"\x00"
-    return struct.pack("<H", len(encoded)) + encoded
+
+class PacketWriter:
+    """Fluent binary packet writer helper for OpenRGB SDK serialization."""
+
+    def __init__(self) -> None:
+        self.buf = bytearray()
+
+    def pack(self, fmt: str, *args: Any) -> PacketWriter:
+        self.buf += struct.pack(fmt, *args)
+        return self
+
+    def write_string(self, s: str) -> PacketWriter:
+        encoded = s.encode("utf-8") + b"\x00"
+        self.pack("<H", len(encoded))
+        self.buf += encoded
+        return self
+
+    def to_bytes(self) -> bytes:
+        return bytes(self.buf)
 
 
 def build_controller_data_packet(protocol_version: int = 3) -> bytes:
     """Build serialized OpenRGB controller data payload for the 7900 XTX Liquid Devil."""
-    buf = bytearray()
-    buf += struct.pack("<I", 3)
-    buf += pack_string("PowerColor RX 7900 XTX Liquid Devil")
-    buf += pack_string("PowerColor")
-    buf += pack_string("Liquid Devil 7900 XTX I2C RGB Controller")
-    buf += pack_string("v2.0")
-    buf += pack_string("AMDGPU DM i2c OEM bus (0x22)")
-    buf += pack_string("0x22")
+    p = PacketWriter()
+    p.pack("<I", 3)  # DEVICE_TYPE_GPU = 3
+    p.write_string("PowerColor RX 7900 XTX Liquid Devil")
+    p.write_string("PowerColor")
+    p.write_string("Liquid Devil 7900 XTX I2C RGB Controller")
+    p.write_string("v2.0")
+    p.write_string("AMDGPU DM i2c OEM bus (0x22)")
+    p.write_string("0x22")
 
-    buf += struct.pack("<H", 1)
-    buf += struct.pack("<i", 0)
+    # Modes Count = 1, Active Mode = 0
+    p.pack("<Hi", 1, 0)
+    p.write_string("Direct")
+    p.pack("<iIIIIIIII", 0, 1, 0, 0, 0, 0, 0, 0, 0)
 
-    buf += pack_string("Direct")
-    buf += struct.pack("<i", 0)
-    buf += struct.pack("<I", 1)
-    buf += struct.pack("<I", 0)
-    buf += struct.pack("<I", 0)
-    buf += struct.pack("<I", 0)
-    buf += struct.pack("<I", 0)
-    buf += struct.pack("<I", 0)
-    buf += struct.pack("<I", 0)
-    buf += struct.pack("<I", 0)
+    # Mode Colors (17 LEDs)
+    color_bytes = b"\x00\x00\xff\x00" if protocol_version >= 4 else b"\x00\x00\xff"
+    p.pack("<H", 17)
+    p.buf += color_bytes * 17
 
-    buf += struct.pack("<H", 17)
-    for _ in range(17):
-        buf += struct.pack("BBB", 0, 0, 255)
-        if protocol_version >= 4:
-            buf += b"\x00"
+    # Zone (1 zone: Liquid Devil Block)
+    p.write_string("Liquid Devil Block")
+    p.pack("<iIIIH", 0, 17, 17, 17, 0)
 
-    buf += struct.pack("<H", 1)
-    buf += pack_string("Liquid Devil Block")
-    buf += struct.pack("<i", 0)
-    buf += struct.pack("<I", 17)
-    buf += struct.pack("<I", 17)
-    buf += struct.pack("<I", 17)
-    buf += struct.pack("<H", 0)
-
-    buf += struct.pack("<H", 17)
+    # LEDs Array (17 LEDs)
+    p.pack("<H", 17)
     for i in range(17):
-        buf += pack_string(f"LED {i}")
-        buf += struct.pack("<I", 0)
+        p.write_string(f"LED {i}")
+        p.pack("<I", 0)
 
-    buf += struct.pack("<H", 17)
-    for _ in range(17):
-        buf += struct.pack("BBB", 0, 0, 255)
-        if protocol_version >= 4:
-            buf += b"\x00"
+    # Colors Array (17 LEDs)
+    p.pack("<H", 17)
+    p.buf += color_bytes * 17
 
-    return bytes(buf)
+    return p.to_bytes()
 
 
 def handle_sdk_client(
@@ -471,7 +489,9 @@ def handle_sdk_client(
                     payload += chunk
 
             if pkt_type == NET_PACKET_TYPE_REQUEST_CONTROLLER_COUNT:
-                resp_header = struct.pack("<4sIII", b"ORGB", 0, NET_PACKET_TYPE_REQUEST_CONTROLLER_COUNT, 4)
+                resp_header = struct.pack(
+                    "<4sIII", b"ORGB", 0, NET_PACKET_TYPE_REQUEST_CONTROLLER_COUNT, 4
+                )
                 resp_payload = struct.pack("<I", 1)
                 client_sock.sendall(resp_header + resp_payload)
 
@@ -479,19 +499,32 @@ def handle_sdk_client(
                 if len(payload) >= 4:
                     protocol_version = struct.unpack("<I", payload[:4])[0]
                 data = build_controller_data_packet(protocol_version)
-                resp_header = struct.pack("<4sIII", b"ORGB", 0, NET_PACKET_TYPE_REQUEST_CONTROLLER_DATA, len(data))
+                resp_header = struct.pack(
+                    "<4sIII",
+                    b"ORGB",
+                    0,
+                    NET_PACKET_TYPE_REQUEST_CONTROLLER_DATA,
+                    len(data),
+                )
                 client_sock.sendall(resp_header + data)
 
             elif pkt_type == NET_PACKET_TYPE_SET_CLIENT_NAME:
                 if len(payload) >= 2:
                     try:
                         name_len = struct.unpack("<H", payload[:2])[0]
-                        client_name = payload[2 : 2 + name_len].decode("utf-8", errors="ignore").rstrip("\x00")
+                        client_name = (
+                            payload[2 : 2 + name_len]
+                            .decode("utf-8", errors="ignore")
+                            .rstrip("\x00")
+                        )
                         print(f"OpenRGB SDK Client Name set to: '{client_name}'")
                     except (struct.error, UnicodeDecodeError):
                         pass
 
-            elif pkt_type in (NET_PACKET_TYPE_UPDATE_LEDS, NET_PACKET_TYPE_UPDATE_ZONE_LEDS):
+            elif pkt_type in (
+                NET_PACKET_TYPE_UPDATE_LEDS,
+                NET_PACKET_TYPE_UPDATE_ZONE_LEDS,
+            ):
                 if len(payload) >= 6:
                     num_colors = struct.unpack("<H", payload[4:6])[0]
                     colors_data = payload[6:]
@@ -509,7 +542,11 @@ def handle_sdk_client(
                             valid_colors += 1
 
                     if valid_colors > 0:
-                        dev.set_all_color(r_total // valid_colors, g_total // valid_colors, b_total // valid_colors)
+                        dev.set_all_color(
+                            r_total // valid_colors,
+                            g_total // valid_colors,
+                            b_total // valid_colors,
+                        )
 
     except (TimeoutError, ConnectionResetError, BrokenPipeError, OSError):
         pass
@@ -518,7 +555,9 @@ def handle_sdk_client(
         print(f"OpenRGB SDK Client disconnected: {client_addr[0]}:{client_addr[1]}")
 
 
-def run_sdk_server(host: str = "0.0.0.0", port: int = 6742, bus_path: str | None = None) -> None:
+def run_sdk_server(
+    host: str = "0.0.0.0", port: int = 6742, bus_path: str | None = None
+) -> None:
     """Run OpenRGB SDK Server daemon listening on specified host/port."""
     server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -550,8 +589,11 @@ def run_sdk_server(host: str = "0.0.0.0", port: int = 6742, bus_path: str | None
 
 # --- Click CLI Group & Commands ---
 
+
 @click.group()
-@click.option("--bus", type=str, default=None, help="I2C bus path (default: auto-detect)")
+@click.option(
+    "--bus", type=str, default=None, help="I2C bus path (default: auto-detect)"
+)
 @click.pass_context
 def cli(ctx: click.Context, bus: str | None) -> None:
     """Linux I2C RGB Control for PowerColor RX 7900 XTX Liquid Devil."""
@@ -560,18 +602,38 @@ def cli(ctx: click.Context, bus: str | None) -> None:
 
 
 @cli.command("openrgb-sync")
-@click.option("--host", type=str, default="127.0.0.1", help="OpenRGB server IP (default: 127.0.0.1)")
-@click.option("--port", type=int, default=6742, help="OpenRGB server port (default: 6742)")
-@click.option("--device-idx", type=int, default=0, help="Target OpenRGB device index to mirror (default: 0)")
-@click.option("--fps", type=int, default=30, help="Sync update frame rate (default: 30)")
+@click.option(
+    "--host",
+    type=str,
+    default="127.0.0.1",
+    help="OpenRGB server IP (default: 127.0.0.1)",
+)
+@click.option(
+    "--port", type=int, default=6742, help="OpenRGB server port (default: 6742)"
+)
+@click.option(
+    "--device-idx",
+    type=int,
+    default=0,
+    help="Target OpenRGB device index to mirror (default: 0)",
+)
+@click.option(
+    "--fps", type=int, default=30, help="Sync update frame rate (default: 30)"
+)
 @click.pass_context
-def openrgb_sync_cmd(ctx: click.Context, host: str, port: int, device_idx: int, fps: int) -> None:
+def openrgb_sync_cmd(
+    ctx: click.Context, host: str, port: int, device_idx: int, fps: int
+) -> None:
     """Sync GPU colors in real-time by connecting as a client to an OpenRGB Server."""
-    run_openrgb_sync_client(host=host, port=port, device_idx=device_idx, fps=fps, bus_path=ctx.obj["bus"])
+    run_openrgb_sync_client(
+        host=host, port=port, device_idx=device_idx, fps=fps, bus_path=ctx.obj["bus"]
+    )
 
 
 @cli.command("sdk-server")
-@click.option("--host", type=str, default="0.0.0.0", help="Host IP to bind (default: 0.0.0.0)")
+@click.option(
+    "--host", type=str, default="0.0.0.0", help="Host IP to bind (default: 0.0.0.0)"
+)
 @click.option("--port", type=int, default=6742, help="Port to listen (default: 6742)")
 @click.pass_context
 def sdk_server_cmd(ctx: click.Context, host: str, port: int) -> None:
@@ -607,7 +669,9 @@ def status_cmd(ctx: click.Context) -> None:
                 8: "ripple",
             }
             mode_str = modes.get(settings[0], f"unknown({settings[0]})")
-            print(f"  Settings: Mode={mode_str}, Brightness={settings[1]}, Speed={settings[2]}")
+            print(
+                f"  Settings: Mode={mode_str}, Brightness={settings[1]}, Speed={settings[2]}"
+            )
         if color:
             print(f"  LED 0 Color: R={color[0]}, G={color[1]}, B={color[2]}")
 
@@ -616,14 +680,25 @@ def status_cmd(ctx: click.Context) -> None:
 @click.argument("r", type=int, required=False)
 @click.argument("g", type=int, required=False)
 @click.argument("b", type=int, required=False)
-@click.option("--hex", "hex_val", type=str, default=None, help="Hex color (e.g. #00FF00)")
+@click.option(
+    "--hex", "hex_val", type=str, default=None, help="Hex color (e.g. #00FF00)"
+)
 @click.option("--brightness", type=int, default=255, help="Brightness (0-255)")
 @click.pass_context
-def static_cmd(ctx: click.Context, r: int | None, g: int | None, b: int | None, hex_val: str | None, brightness: int) -> None:
+def static_cmd(
+    ctx: click.Context,
+    r: int | None,
+    g: int | None,
+    b: int | None,
+    hex_val: str | None,
+    brightness: int,
+) -> None:
     """Set solid static color (Mode 1)."""
     red, green, blue = parse_color_args(r, g, b, hex_val)
     with LiquidDevilRGB(bus_path=ctx.obj["bus"]) as dev:
-        print(f"Setting static color: R={red} G={green} B={blue} (Brightness={brightness})")
+        print(
+            f"Setting static color: R={red} G={green} B={blue} (Brightness={brightness})"
+        )
         dev.set_static(red, green, blue, brightness=brightness)
 
 
@@ -631,12 +706,20 @@ def static_cmd(ctx: click.Context, r: int | None, g: int | None, b: int | None, 
 @click.argument("r", type=int, required=False)
 @click.argument("g", type=int, required=False)
 @click.argument("b", type=int, required=False)
-@click.option("--hex", "hex_val", type=str, default=None, help="Hex color (e.g. #00FF00)")
+@click.option(
+    "--hex", "hex_val", type=str, default=None, help="Hex color (e.g. #00FF00)"
+)
 @click.option("--brightness", type=int, default=255, help="Brightness (0-255)")
 @click.option("--speed", type=int, default=50, help="Animation speed (0-255)")
 @click.pass_context
 def breathing_cmd(
-    ctx: click.Context, r: int | None, g: int | None, b: int | None, hex_val: str | None, brightness: int, speed: int
+    ctx: click.Context,
+    r: int | None,
+    g: int | None,
+    b: int | None,
+    hex_val: str | None,
+    brightness: int,
+    speed: int,
 ) -> None:
     """Set breathing effect (Mode 2)."""
     red, green, blue = parse_color_args(r, g, b, hex_val)
@@ -660,12 +743,20 @@ def neon_cmd(ctx: click.Context, brightness: int, speed: int) -> None:
 @click.argument("r", type=int, required=False)
 @click.argument("g", type=int, required=False)
 @click.argument("b", type=int, required=False)
-@click.option("--hex", "hex_val", type=str, default=None, help="Hex color (e.g. #00FF00)")
+@click.option(
+    "--hex", "hex_val", type=str, default=None, help="Hex color (e.g. #00FF00)"
+)
 @click.option("--brightness", type=int, default=255, help="Brightness (0-255)")
 @click.option("--speed", type=int, default=50, help="Animation speed (0-255)")
 @click.pass_context
 def blink_cmd(
-    ctx: click.Context, r: int | None, g: int | None, b: int | None, hex_val: str | None, brightness: int, speed: int
+    ctx: click.Context,
+    r: int | None,
+    g: int | None,
+    b: int | None,
+    hex_val: str | None,
+    brightness: int,
+    speed: int,
 ) -> None:
     """Set single flash pulse effect (Mode 4)."""
     red, green, blue = parse_color_args(r, g, b, hex_val)
@@ -678,17 +769,27 @@ def blink_cmd(
 @click.argument("r", type=int, required=False)
 @click.argument("g", type=int, required=False)
 @click.argument("b", type=int, required=False)
-@click.option("--hex", "hex_val", type=str, default=None, help="Hex color (e.g. #00FF00)")
+@click.option(
+    "--hex", "hex_val", type=str, default=None, help="Hex color (e.g. #00FF00)"
+)
 @click.option("--brightness", type=int, default=255, help="Brightness (0-255)")
 @click.option("--speed", type=int, default=50, help="Animation speed (0-255)")
 @click.pass_context
 def double_blink_cmd(
-    ctx: click.Context, r: int | None, g: int | None, b: int | None, hex_val: str | None, brightness: int, speed: int
+    ctx: click.Context,
+    r: int | None,
+    g: int | None,
+    b: int | None,
+    hex_val: str | None,
+    brightness: int,
+    speed: int,
 ) -> None:
     """Set double flash pulse effect (Mode 5)."""
     red, green, blue = parse_color_args(r, g, b, hex_val)
     with LiquidDevilRGB(bus_path=ctx.obj["bus"]) as dev:
-        print(f"Setting double-blink effect: R={red} G={green} B={blue} (Speed={speed})")
+        print(
+            f"Setting double-blink effect: R={red} G={green} B={blue} (Speed={speed})"
+        )
         dev.set_double_blink(red, green, blue, brightness=brightness, speed=speed)
 
 
@@ -696,12 +797,20 @@ def double_blink_cmd(
 @click.argument("r", type=int, required=False)
 @click.argument("g", type=int, required=False)
 @click.argument("b", type=int, required=False)
-@click.option("--hex", "hex_val", type=str, default=None, help="Hex color (e.g. #00FF00)")
+@click.option(
+    "--hex", "hex_val", type=str, default=None, help="Hex color (e.g. #00FF00)"
+)
 @click.option("--brightness", type=int, default=255, help="Brightness (0-255)")
 @click.option("--speed", type=int, default=20, help="Animation speed (0-255)")
 @click.pass_context
 def meteor_cmd(
-    ctx: click.Context, r: int | None, g: int | None, b: int | None, hex_val: str | None, brightness: int, speed: int
+    ctx: click.Context,
+    r: int | None,
+    g: int | None,
+    b: int | None,
+    hex_val: str | None,
+    brightness: int,
+    speed: int,
 ) -> None:
     """Set meteor beam effect across face (Mode 7)."""
     red, green, blue = parse_color_args(r, g, b, hex_val)
@@ -714,12 +823,20 @@ def meteor_cmd(
 @click.argument("r", type=int, required=False)
 @click.argument("g", type=int, required=False)
 @click.argument("b", type=int, required=False)
-@click.option("--hex", "hex_val", type=str, default=None, help="Hex color (e.g. #00FF00)")
+@click.option(
+    "--hex", "hex_val", type=str, default=None, help="Hex color (e.g. #00FF00)"
+)
 @click.option("--brightness", type=int, default=255, help="Brightness (0-255)")
 @click.option("--speed", type=int, default=30, help="Animation speed (0-255)")
 @click.pass_context
 def ripple_cmd(
-    ctx: click.Context, r: int | None, g: int | None, b: int | None, hex_val: str | None, brightness: int, speed: int
+    ctx: click.Context,
+    r: int | None,
+    g: int | None,
+    b: int | None,
+    hex_val: str | None,
+    brightness: int,
+    speed: int,
 ) -> None:
     """Set ripple wave expansion effect (Mode 8)."""
     red, green, blue = parse_color_args(r, g, b, hex_val)
