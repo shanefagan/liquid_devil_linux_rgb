@@ -20,3 +20,8 @@ wheels/
 *.egg
 .idea/
 .vscode/
+
+# Arch Linux packaging outputs
+pkg/
+src/
+*.pkg.tar.zst

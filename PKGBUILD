@@ -1,0 +1,25 @@
+# Maintainer: Shane Fagan <shane@performativenonsense.com>
+
+pkgname=liquid-devil-rgb
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="Linux I2C RGB Lighting Control for PowerColor Radeon RX 7900 XTX Liquid Devil"
+arch=('any')
+url="https://github.com/shane/liquid-devil-rgb"
+license=('MIT')
+depends=('python' 'i2c-tools')
+makedepends=('python-setuptools')
+source=()
+
+build() {
+  cd "$startdir"
+  python setup.py build
+}
+
+package() {
+  cd "$startdir"
+  python setup.py install --root="$pkgdir" --optimize=1 --skip-build
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+  install -Dm644 PROTOCOL.md "$pkgdir/usr/share/doc/$pkgname/PROTOCOL.md"
+}

@@ -8,21 +8,15 @@ version = "1.0.0"
 description = "Linux I2C RGB Lighting Control for PowerColor Radeon RX 7900 XTX Liquid Devil"
 readme = "README.md"
 authors = [
-    { name = "Community" }
+    { name = "Shane Fagan", email = "shane@performativenonsense.com" }
 ]
-license = { text = "MIT" }
+license = "MIT"
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Environment :: Console",
     "Intended Audience :: End Users/Desktop",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
     "Topic :: System :: Hardware :: Hardware Drivers",
 ]
 keywords = ["gpu", "rgb", "powercolor", "liquid-devil", "rx7900xtx", "i2c", "linux"]
