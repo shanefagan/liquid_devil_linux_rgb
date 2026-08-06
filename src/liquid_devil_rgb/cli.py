@@ -2,7 +2,7 @@
 """Linux I2C RGB Control for PowerColor Radeon RX 7900 XTX Liquid Devil.
 
 Reverse-engineered hardware protocol implementation for the V2 I2C RGB controller (0x22).
-Uses smbus2 for I2C communication and click for CLI interface.
+Supports smbus2 with a seamless stdlib ctypes fallback when smbus2 is not installed.
 """
 
 from __future__ import annotations
@@ -17,7 +17,31 @@ import time
 from typing import TYPE_CHECKING, Self
 
 import click
-from smbus2 import SMBus, i2c_msg
+
+# Attempt smbus2 import with transparent stdlib ctypes fallback
+try:
+    from smbus2 import SMBus, i2c_msg
+    HAS_SMBUS2 = True
+except ImportError:
+    import ctypes
+    import fcntl
+
+    I2C_RDWR = 0x0707
+    HAS_SMBUS2 = False
+
+    class I2CMsg(ctypes.Structure):
+        _fields_ = [
+            ("addr", ctypes.c_uint16),
+            ("flags", ctypes.c_uint16),
+            ("len", ctypes.c_uint16),
+            ("buf", ctypes.c_char_p),
+        ]
+
+    class I2CRdwrIoctlData(ctypes.Structure):
+        _fields_ = [
+            ("msgs", ctypes.POINTER(I2CMsg)),
+            ("nmsgs", ctypes.c_uint32),
+        ]
 
 if TYPE_CHECKING:
     from types import TracebackType
@@ -55,7 +79,9 @@ def find_oem_i2c_bus() -> str:
 class LiquidDevilRGB:
     """Hardware controller interface for PowerColor RX 7900 XTX Liquid Devil RGB lighting."""
 
-    def __init__(self, bus_path: str | None = None, addr: int = DEFAULT_ADDR) -> None:
+    def __init__(
+        self, bus_path: str | None = None, addr: int = DEFAULT_ADDR
+    ) -> None:
         """Initialize the RGB controller instance.
 
         Args:
@@ -65,21 +91,28 @@ class LiquidDevilRGB:
         self.bus_path: str = bus_path or find_oem_i2c_bus()
         self.addr: int = addr
         self.bus: SMBus | None = None
+        self.fd: int | None = None
 
     def open(self) -> None:
-        """Open the SMBus connection."""
+        """Open the I2C device via SMBus or raw file descriptor."""
         if not os.path.exists(self.bus_path):
             raise FileNotFoundError(
                 f"I2C bus path '{self.bus_path}' not found. "
                 "Ensure i2c-dev kernel module is loaded (sudo modprobe i2c-dev)."
             )
-        self.bus = SMBus(self.bus_path)
+        if HAS_SMBUS2:
+            self.bus = SMBus(self.bus_path)
+        else:
+            self.fd = os.open(self.bus_path, os.O_RDWR)
 
     def close(self) -> None:
-        """Close the SMBus connection."""
+        """Close the I2C device."""
         if self.bus is not None:
             self.bus.close()
             self.bus = None
+        if self.fd is not None:
+            os.close(self.fd)
+            self.fd = None
 
     def __enter__(self) -> Self:
         self.open()
@@ -103,17 +136,33 @@ class LiquidDevilRGB:
         Returns:
             True if write transaction succeeded, False otherwise.
         """
-        if self.bus is None:
-            raise RuntimeError("I2C device is not open")
-
-        payload = [offset] + list(data)
-        msg = i2c_msg.write(self.addr, payload)
-        try:
-            self.bus.i2c_rdwr(msg)
-            return True
-        except OSError as e:
-            print(f"Error writing offset 0x{offset:02X}: {e}", file=sys.stderr)
-            return False
+        if HAS_SMBUS2 and self.bus is not None:
+            payload = [offset] + list(data)
+            msg = i2c_msg.write(self.addr, payload)
+            try:
+                self.bus.i2c_rdwr(msg)
+                return True
+            except OSError as e:
+                print(f"Error writing offset 0x{offset:02X}: {e}", file=sys.stderr)
+                return False
+        elif self.fd is not None:
+            payload = bytes([offset] + list(data))
+            buf = ctypes.create_string_buffer(payload)
+            msg = I2CMsg(
+                addr=self.addr,
+                flags=0,
+                len=len(payload),
+                buf=ctypes.cast(buf, ctypes.c_char_p),
+            )
+            msgs = (I2CMsg * 1)(msg)
+            ioctl_data = I2CRdwrIoctlData(msgs=msgs, nmsgs=1)
+            try:
+                fcntl.ioctl(self.fd, I2C_RDWR, ioctl_data)
+                return True
+            except OSError as e:
+                print(f"Error writing offset 0x{offset:02X}: {e}", file=sys.stderr)
+                return False
+        raise RuntimeError("I2C device is not open")
 
     def read_raw(self, offset: int, length: int = 3) -> list[int] | None:
         """Read bytes from a microcontroller offset register using repeated start.
@@ -125,17 +174,36 @@ class LiquidDevilRGB:
         Returns:
             List of integers representing returned byte values, or None on failure.
         """
-        if self.bus is None:
-            raise RuntimeError("I2C device is not open")
-
-        msg_w = i2c_msg.write(self.addr, [offset])
-        msg_r = i2c_msg.read(self.addr, length)
-        try:
-            self.bus.i2c_rdwr(msg_w, msg_r)
-            return list(msg_r)
-        except OSError as e:
-            print(f"Error reading offset 0x{offset:02X}: {e}", file=sys.stderr)
-            return None
+        if HAS_SMBUS2 and self.bus is not None:
+            msg_w = i2c_msg.write(self.addr, [offset])
+            msg_r = i2c_msg.read(self.addr, length)
+            try:
+                self.bus.i2c_rdwr(msg_w, msg_r)
+                return list(msg_r)
+            except OSError as e:
+                print(f"Error reading offset 0x{offset:02X}: {e}", file=sys.stderr)
+                return None
+        elif self.fd is not None:
+            wbuf = ctypes.create_string_buffer(bytes([offset]))
+            rbuf = ctypes.create_string_buffer(length)
+            msg_w = I2CMsg(
+                addr=self.addr, flags=0, len=1, buf=ctypes.cast(wbuf, ctypes.c_char_p)
+            )
+            msg_r = I2CMsg(
+                addr=self.addr,
+                flags=1,
+                len=length,
+                buf=ctypes.cast(rbuf, ctypes.c_char_p),
+            )
+            msgs = (I2CMsg * 2)(msg_w, msg_r)
+            ioctl_data = I2CRdwrIoctlData(msgs=msgs, nmsgs=2)
+            try:
+                fcntl.ioctl(self.fd, I2C_RDWR, ioctl_data)
+                return list(rbuf.raw[:length])
+            except OSError as e:
+                print(f"Error reading offset 0x{offset:02X}: {e}", file=sys.stderr)
+                return None
+        raise RuntimeError("I2C device is not open")
 
     def set_settings(self, mode: int, brightness: int, speed: int) -> bool:
         """Set controller settings register (offset 1)."""
@@ -238,16 +306,13 @@ def parse_color_args(
                 )
             except ValueError:
                 pass
-        raise click.BadParameter(
-            f"Invalid hex color '{hex_val}'. Must be RRGGBB or #RRGGBB."
-        )
+        raise click.BadParameter(f"Invalid hex color '{hex_val}'. Must be RRGGBB or #RRGGBB.")
     if r is not None and g is not None and b is not None:
         return r, g, b
     raise click.UsageError("Specify R G B values (0-255) or --hex color.")
 
 
 # --- OpenRGB SDK Client Sync Module ---
-
 
 def run_openrgb_sync_client(
     host: str = "127.0.0.1",
@@ -261,7 +326,7 @@ def run_openrgb_sync_client(
     print("PowerColor RX 7900 XTX Liquid Devil - OpenRGB Sync Client")
     print(f"Connecting to OpenRGB Server at {host}:{port}")
     print(f"Target Device Index: {device_idx}")
-    print(f"Sync Rate: ~{fps} FPS ({interval * 1000:.1f}ms interval)")
+    print(f"Sync Rate: ~{fps} FPS ({interval*1000:.1f}ms interval)")
     print("Press Ctrl+C to stop sync daemon.\n")
 
     with LiquidDevilRGB(bus_path=bus_path) as dev:
@@ -275,25 +340,13 @@ def run_openrgb_sync_client(
 
                 name_bytes = b"Liquid Devil GPU Sync\x00"
                 name_payload = struct.pack("<H", len(name_bytes)) + name_bytes
-                hdr = struct.pack(
-                    "<4sIII",
-                    b"ORGB",
-                    0,
-                    NET_PACKET_TYPE_SET_CLIENT_NAME,
-                    len(name_payload),
-                )
+                hdr = struct.pack("<4sIII", b"ORGB", 0, NET_PACKET_TYPE_SET_CLIENT_NAME, len(name_payload))
                 s.sendall(hdr + name_payload)
 
                 print(f"Connected to OpenRGB Server at {host}:{port}")
 
                 while True:
-                    req_hdr = struct.pack(
-                        "<4sIII",
-                        b"ORGB",
-                        device_idx,
-                        NET_PACKET_TYPE_REQUEST_CONTROLLER_DATA,
-                        4,
-                    )
+                    req_hdr = struct.pack("<4sIII", b"ORGB", device_idx, NET_PACKET_TYPE_REQUEST_CONTROLLER_DATA, 4)
                     s.sendall(req_hdr + struct.pack("<I", 3))
 
                     resp_hdr = s.recv(16)
@@ -320,10 +373,7 @@ def run_openrgb_sync_client(
                     time.sleep(interval)
 
             except (TimeoutError, ConnectionResetError, BrokenPipeError, OSError) as e:
-                print(
-                    f"Disconnected from OpenRGB server ({e}). Retrying in 3 seconds...",
-                    file=sys.stderr,
-                )
+                print(f"Disconnected from OpenRGB server ({e}). Retrying in 3 seconds...", file=sys.stderr)
                 time.sleep(3.0)
             except KeyboardInterrupt:
                 print("\nStopping OpenRGB Sync daemon.")
@@ -331,7 +381,6 @@ def run_openrgb_sync_client(
 
 
 # --- OpenRGB SDK Server Helpers ---
-
 
 def pack_string(s: str) -> bytes:
     """Pack string with 16-bit length prefix as expected by OpenRGB SDK."""
@@ -422,9 +471,7 @@ def handle_sdk_client(
                     payload += chunk
 
             if pkt_type == NET_PACKET_TYPE_REQUEST_CONTROLLER_COUNT:
-                resp_header = struct.pack(
-                    "<4sIII", b"ORGB", 0, NET_PACKET_TYPE_REQUEST_CONTROLLER_COUNT, 4
-                )
+                resp_header = struct.pack("<4sIII", b"ORGB", 0, NET_PACKET_TYPE_REQUEST_CONTROLLER_COUNT, 4)
                 resp_payload = struct.pack("<I", 1)
                 client_sock.sendall(resp_header + resp_payload)
 
@@ -432,32 +479,19 @@ def handle_sdk_client(
                 if len(payload) >= 4:
                     protocol_version = struct.unpack("<I", payload[:4])[0]
                 data = build_controller_data_packet(protocol_version)
-                resp_header = struct.pack(
-                    "<4sIII",
-                    b"ORGB",
-                    0,
-                    NET_PACKET_TYPE_REQUEST_CONTROLLER_DATA,
-                    len(data),
-                )
+                resp_header = struct.pack("<4sIII", b"ORGB", 0, NET_PACKET_TYPE_REQUEST_CONTROLLER_DATA, len(data))
                 client_sock.sendall(resp_header + data)
 
             elif pkt_type == NET_PACKET_TYPE_SET_CLIENT_NAME:
                 if len(payload) >= 2:
                     try:
                         name_len = struct.unpack("<H", payload[:2])[0]
-                        client_name = (
-                            payload[2 : 2 + name_len]
-                            .decode("utf-8", errors="ignore")
-                            .rstrip("\x00")
-                        )
+                        client_name = payload[2 : 2 + name_len].decode("utf-8", errors="ignore").rstrip("\x00")
                         print(f"OpenRGB SDK Client Name set to: '{client_name}'")
                     except (struct.error, UnicodeDecodeError):
                         pass
 
-            elif pkt_type in (
-                NET_PACKET_TYPE_UPDATE_LEDS,
-                NET_PACKET_TYPE_UPDATE_ZONE_LEDS,
-            ):
+            elif pkt_type in (NET_PACKET_TYPE_UPDATE_LEDS, NET_PACKET_TYPE_UPDATE_ZONE_LEDS):
                 if len(payload) >= 6:
                     num_colors = struct.unpack("<H", payload[4:6])[0]
                     colors_data = payload[6:]
@@ -475,11 +509,7 @@ def handle_sdk_client(
                             valid_colors += 1
 
                     if valid_colors > 0:
-                        dev.set_all_color(
-                            r_total // valid_colors,
-                            g_total // valid_colors,
-                            b_total // valid_colors,
-                        )
+                        dev.set_all_color(r_total // valid_colors, g_total // valid_colors, b_total // valid_colors)
 
     except (TimeoutError, ConnectionResetError, BrokenPipeError, OSError):
         pass
@@ -488,9 +518,7 @@ def handle_sdk_client(
         print(f"OpenRGB SDK Client disconnected: {client_addr[0]}:{client_addr[1]}")
 
 
-def run_sdk_server(
-    host: str = "0.0.0.0", port: int = 6742, bus_path: str | None = None
-) -> None:
+def run_sdk_server(host: str = "0.0.0.0", port: int = 6742, bus_path: str | None = None) -> None:
     """Run OpenRGB SDK Server daemon listening on specified host/port."""
     server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -522,11 +550,8 @@ def run_sdk_server(
 
 # --- Click CLI Group & Commands ---
 
-
 @click.group()
-@click.option(
-    "--bus", type=str, default=None, help="I2C bus path (default: auto-detect)"
-)
+@click.option("--bus", type=str, default=None, help="I2C bus path (default: auto-detect)")
 @click.pass_context
 def cli(ctx: click.Context, bus: str | None) -> None:
     """Linux I2C RGB Control for PowerColor RX 7900 XTX Liquid Devil."""
@@ -535,38 +560,18 @@ def cli(ctx: click.Context, bus: str | None) -> None:
 
 
 @cli.command("openrgb-sync")
-@click.option(
-    "--host",
-    type=str,
-    default="127.0.0.1",
-    help="OpenRGB server IP (default: 127.0.0.1)",
-)
-@click.option(
-    "--port", type=int, default=6742, help="OpenRGB server port (default: 6742)"
-)
-@click.option(
-    "--device-idx",
-    type=int,
-    default=0,
-    help="Target OpenRGB device index to mirror (default: 0)",
-)
-@click.option(
-    "--fps", type=int, default=30, help="Sync update frame rate (default: 30)"
-)
+@click.option("--host", type=str, default="127.0.0.1", help="OpenRGB server IP (default: 127.0.0.1)")
+@click.option("--port", type=int, default=6742, help="OpenRGB server port (default: 6742)")
+@click.option("--device-idx", type=int, default=0, help="Target OpenRGB device index to mirror (default: 0)")
+@click.option("--fps", type=int, default=30, help="Sync update frame rate (default: 30)")
 @click.pass_context
-def openrgb_sync_cmd(
-    ctx: click.Context, host: str, port: int, device_idx: int, fps: int
-) -> None:
+def openrgb_sync_cmd(ctx: click.Context, host: str, port: int, device_idx: int, fps: int) -> None:
     """Sync GPU colors in real-time by connecting as a client to an OpenRGB Server."""
-    run_openrgb_sync_client(
-        host=host, port=port, device_idx=device_idx, fps=fps, bus_path=ctx.obj["bus"]
-    )
+    run_openrgb_sync_client(host=host, port=port, device_idx=device_idx, fps=fps, bus_path=ctx.obj["bus"])
 
 
 @cli.command("sdk-server")
-@click.option(
-    "--host", type=str, default="0.0.0.0", help="Host IP to bind (default: 0.0.0.0)"
-)
+@click.option("--host", type=str, default="0.0.0.0", help="Host IP to bind (default: 0.0.0.0)")
 @click.option("--port", type=int, default=6742, help="Port to listen (default: 6742)")
 @click.pass_context
 def sdk_server_cmd(ctx: click.Context, host: str, port: int) -> None:
@@ -602,9 +607,7 @@ def status_cmd(ctx: click.Context) -> None:
                 8: "ripple",
             }
             mode_str = modes.get(settings[0], f"unknown({settings[0]})")
-            print(
-                f"  Settings: Mode={mode_str}, Brightness={settings[1]}, Speed={settings[2]}"
-            )
+            print(f"  Settings: Mode={mode_str}, Brightness={settings[1]}, Speed={settings[2]}")
         if color:
             print(f"  LED 0 Color: R={color[0]}, G={color[1]}, B={color[2]}")
 
@@ -613,25 +616,14 @@ def status_cmd(ctx: click.Context) -> None:
 @click.argument("r", type=int, required=False)
 @click.argument("g", type=int, required=False)
 @click.argument("b", type=int, required=False)
-@click.option(
-    "--hex", "hex_val", type=str, default=None, help="Hex color (e.g. #00FF00)"
-)
+@click.option("--hex", "hex_val", type=str, default=None, help="Hex color (e.g. #00FF00)")
 @click.option("--brightness", type=int, default=255, help="Brightness (0-255)")
 @click.pass_context
-def static_cmd(
-    ctx: click.Context,
-    r: int | None,
-    g: int | None,
-    b: int | None,
-    hex_val: str | None,
-    brightness: int,
-) -> None:
+def static_cmd(ctx: click.Context, r: int | None, g: int | None, b: int | None, hex_val: str | None, brightness: int) -> None:
     """Set solid static color (Mode 1)."""
     red, green, blue = parse_color_args(r, g, b, hex_val)
     with LiquidDevilRGB(bus_path=ctx.obj["bus"]) as dev:
-        print(
-            f"Setting static color: R={red} G={green} B={blue} (Brightness={brightness})"
-        )
+        print(f"Setting static color: R={red} G={green} B={blue} (Brightness={brightness})")
         dev.set_static(red, green, blue, brightness=brightness)
 
 
@@ -639,20 +631,12 @@ def static_cmd(
 @click.argument("r", type=int, required=False)
 @click.argument("g", type=int, required=False)
 @click.argument("b", type=int, required=False)
-@click.option(
-    "--hex", "hex_val", type=str, default=None, help="Hex color (e.g. #00FF00)"
-)
+@click.option("--hex", "hex_val", type=str, default=None, help="Hex color (e.g. #00FF00)")
 @click.option("--brightness", type=int, default=255, help="Brightness (0-255)")
 @click.option("--speed", type=int, default=50, help="Animation speed (0-255)")
 @click.pass_context
 def breathing_cmd(
-    ctx: click.Context,
-    r: int | None,
-    g: int | None,
-    b: int | None,
-    hex_val: str | None,
-    brightness: int,
-    speed: int,
+    ctx: click.Context, r: int | None, g: int | None, b: int | None, hex_val: str | None, brightness: int, speed: int
 ) -> None:
     """Set breathing effect (Mode 2)."""
     red, green, blue = parse_color_args(r, g, b, hex_val)
@@ -676,20 +660,12 @@ def neon_cmd(ctx: click.Context, brightness: int, speed: int) -> None:
 @click.argument("r", type=int, required=False)
 @click.argument("g", type=int, required=False)
 @click.argument("b", type=int, required=False)
-@click.option(
-    "--hex", "hex_val", type=str, default=None, help="Hex color (e.g. #00FF00)"
-)
+@click.option("--hex", "hex_val", type=str, default=None, help="Hex color (e.g. #00FF00)")
 @click.option("--brightness", type=int, default=255, help="Brightness (0-255)")
 @click.option("--speed", type=int, default=50, help="Animation speed (0-255)")
 @click.pass_context
 def blink_cmd(
-    ctx: click.Context,
-    r: int | None,
-    g: int | None,
-    b: int | None,
-    hex_val: str | None,
-    brightness: int,
-    speed: int,
+    ctx: click.Context, r: int | None, g: int | None, b: int | None, hex_val: str | None, brightness: int, speed: int
 ) -> None:
     """Set single flash pulse effect (Mode 4)."""
     red, green, blue = parse_color_args(r, g, b, hex_val)
@@ -702,27 +678,17 @@ def blink_cmd(
 @click.argument("r", type=int, required=False)
 @click.argument("g", type=int, required=False)
 @click.argument("b", type=int, required=False)
-@click.option(
-    "--hex", "hex_val", type=str, default=None, help="Hex color (e.g. #00FF00)"
-)
+@click.option("--hex", "hex_val", type=str, default=None, help="Hex color (e.g. #00FF00)")
 @click.option("--brightness", type=int, default=255, help="Brightness (0-255)")
 @click.option("--speed", type=int, default=50, help="Animation speed (0-255)")
 @click.pass_context
 def double_blink_cmd(
-    ctx: click.Context,
-    r: int | None,
-    g: int | None,
-    b: int | None,
-    hex_val: str | None,
-    brightness: int,
-    speed: int,
+    ctx: click.Context, r: int | None, g: int | None, b: int | None, hex_val: str | None, brightness: int, speed: int
 ) -> None:
     """Set double flash pulse effect (Mode 5)."""
     red, green, blue = parse_color_args(r, g, b, hex_val)
     with LiquidDevilRGB(bus_path=ctx.obj["bus"]) as dev:
-        print(
-            f"Setting double-blink effect: R={red} G={green} B={blue} (Speed={speed})"
-        )
+        print(f"Setting double-blink effect: R={red} G={green} B={blue} (Speed={speed})")
         dev.set_double_blink(red, green, blue, brightness=brightness, speed=speed)
 
 
@@ -730,20 +696,12 @@ def double_blink_cmd(
 @click.argument("r", type=int, required=False)
 @click.argument("g", type=int, required=False)
 @click.argument("b", type=int, required=False)
-@click.option(
-    "--hex", "hex_val", type=str, default=None, help="Hex color (e.g. #00FF00)"
-)
+@click.option("--hex", "hex_val", type=str, default=None, help="Hex color (e.g. #00FF00)")
 @click.option("--brightness", type=int, default=255, help="Brightness (0-255)")
 @click.option("--speed", type=int, default=20, help="Animation speed (0-255)")
 @click.pass_context
 def meteor_cmd(
-    ctx: click.Context,
-    r: int | None,
-    g: int | None,
-    b: int | None,
-    hex_val: str | None,
-    brightness: int,
-    speed: int,
+    ctx: click.Context, r: int | None, g: int | None, b: int | None, hex_val: str | None, brightness: int, speed: int
 ) -> None:
     """Set meteor beam effect across face (Mode 7)."""
     red, green, blue = parse_color_args(r, g, b, hex_val)
@@ -756,20 +714,12 @@ def meteor_cmd(
 @click.argument("r", type=int, required=False)
 @click.argument("g", type=int, required=False)
 @click.argument("b", type=int, required=False)
-@click.option(
-    "--hex", "hex_val", type=str, default=None, help="Hex color (e.g. #00FF00)"
-)
+@click.option("--hex", "hex_val", type=str, default=None, help="Hex color (e.g. #00FF00)")
 @click.option("--brightness", type=int, default=255, help="Brightness (0-255)")
 @click.option("--speed", type=int, default=30, help="Animation speed (0-255)")
 @click.pass_context
 def ripple_cmd(
-    ctx: click.Context,
-    r: int | None,
-    g: int | None,
-    b: int | None,
-    hex_val: str | None,
-    brightness: int,
-    speed: int,
+    ctx: click.Context, r: int | None, g: int | None, b: int | None, hex_val: str | None, brightness: int, speed: int
 ) -> None:
     """Set ripple wave expansion effect (Mode 8)."""
     red, green, blue = parse_color_args(r, g, b, hex_val)

@@ -33,7 +33,7 @@ Section: utils
 Priority: optional
 Architecture: all
 Maintainer: Shane Fagan <shane@performativenonsense.com>
-Depends: python3, i2c-tools
+Depends: python3, python3-click, i2c-tools
 Description: Linux I2C RGB Control for PowerColor Radeon RX 7900 XTX Liquid Devil
  Reverse-engineered hardware protocol implementation for the V2 I2C RGB
  controller (0x22). Includes OpenRGB SDK sync client for real-time PC lighting.

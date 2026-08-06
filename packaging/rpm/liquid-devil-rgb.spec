@@ -9,8 +9,9 @@ Source0:        %{name}-%{version}.tar.gz
 
 BuildArch:      noarch
 BuildRequires:  python3-devel
-BuildRequires:  python3-setuptools
+BuildRequires:  python3-hatchling
 Requires:       python3
+Requires:       python3-click
 Requires:       i2c-tools
 
 %description

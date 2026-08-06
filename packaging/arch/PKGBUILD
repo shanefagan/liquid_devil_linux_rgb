@@ -7,7 +7,7 @@ pkgdesc="Linux I2C RGB Lighting Control for PowerColor Radeon RX 7900 XTX Liquid
 arch=('any')
 url="https://github.com/shanefagan/liquid_devil_linux_rgb"
 license=('MIT')
-depends=('python' 'i2c-tools')
+depends=('python' 'python-click' 'i2c-tools')
 makedepends=('uv')
 source=()
 
