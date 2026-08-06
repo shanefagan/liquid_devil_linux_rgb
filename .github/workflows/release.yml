@@ -1,0 +1,82 @@
+name: Build and Release Packages
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install Astral uv & Python
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: '3.11'
+          enable-cache: true
+
+      - name: Build Python Wheel and Source Distribution
+        run: |
+          uv build
+
+      - name: Build Debian (.deb) Package
+        run: |
+          python3 packaging/build_deb.py
+
+      - name: Build Arch Linux (.pkg.tar.zst) Package
+        run: |
+          sudo apt-get update && sudo apt-get install -y bsdtar zstd
+          mkdir -p build_arch
+          cp -r src/liquid_devil_rgb build_arch/
+          mkdir -p build_arch/usr/bin build_arch/usr/lib/python3/site-packages
+          cp -r src/liquid_devil_rgb build_arch/usr/lib/python3/site-packages/
+          cat << 'EOF' > build_arch/usr/bin/liquid-devil-rgb
+          #!/usr/bin/env python3
+          from liquid_devil_rgb.cli import main
+          if __name__ == '__main__':
+              main()
+          EOF
+          chmod +x build_arch/usr/bin/liquid-devil-rgb
+
+          # Create .PKGINFO
+          cat << 'EOF' > build_arch/.PKGINFO
+          pkgname = liquid-devil-rgb
+          pkgver = 1.0.0-1
+          pkgdesc = Linux I2C RGB Lighting Control for PowerColor Radeon RX 7900 XTX Liquid Devil
+          url = https://github.com/shanefagan/liquid_devil_linux_rgb
+          builddate = 1722950000
+          packager = Shane Fagan <shane@performativenonsense.com>
+          size = 45000
+          arch = any
+          license = MIT
+          depend = python
+          depend = i2c-tools
+          EOF
+
+          cd build_arch
+          bsdtar -czf ../.MTREE --format=mtree --options='!all,use-set,type,uid,gid,mode,time,size,md5,sha256,link' .PKGINFO usr
+          bsdtar -c --zstd -f ../dist/liquid-devil-rgb-1.0.0-1-any.pkg.tar.zst .PKGINFO .MTREE usr
+
+      - name: Display Built Artifacts
+        run: |
+          ls -la dist/
+
+      - name: Create GitHub Release and Upload Packages
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.whl
+            dist/*.tar.gz
+            dist/*.deb
+            dist/*.pkg.tar.zst
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
