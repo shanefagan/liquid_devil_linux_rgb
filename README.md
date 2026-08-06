@@ -44,15 +44,9 @@ To load `i2c-dev` automatically on boot:
 echo "i2c-dev" | sudo tee /etc/modules-load.d/i2c-dev.conf
 ```
 
-Ensure your user is in the `i2c` group:
-
-```bash
-sudo usermod -aG i2c $USER
-```
-
 ### Install Package
 
-Clone the repository and install with `uv`:
+Build and install using `uv`:
 
 ```bash
 git clone https://github.com/shanefagan/liquid_devil_linux_rgb.git
@@ -60,11 +54,14 @@ cd liquid_devil_linux_rgb
 uv tool install .
 ```
 
-Or build the Arch Linux package:
+Or install the package for your distribution:
 
 ```bash
-cd packaging/arch
-makepkg -si
+# Arch Linux / CachyOS / Manjaro
+sudo pacman -U liquid-devil-rgb-1.0.0-1-any.pkg.tar.zst
+
+# Debian / Ubuntu / Mint / Pop!_OS
+sudo dpkg -i liquid-devil-rgb_1.0.0-1_all.deb
 ```
 
 ---
@@ -72,6 +69,8 @@ makepkg -si
 ## Systemd Service (OpenRGB Sync Client)
 
 The package installs `liquid-devil-sync.service` to `/usr/lib/systemd/system/liquid-devil-sync.service` disabled by default.
+
+Because systemd services run with root system credentials, the service automatically has full I2C hardware access on start.
 
 To enable and start the OpenRGB sync service at boot:
 
