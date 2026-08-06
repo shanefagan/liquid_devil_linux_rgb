@@ -2,6 +2,8 @@ name: Build and Release Packages
 
 on:
   push:
+    branches:
+      - main
     tags:
       - 'v*'
   workflow_dispatch:
@@ -72,6 +74,7 @@ jobs:
       - name: Create GitHub Release and Upload Packages
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: v1.0.0
           files: |
             dist/*.whl
             dist/*.tar.gz
