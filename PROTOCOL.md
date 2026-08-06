@@ -49,17 +49,15 @@ All I2C transactions are structured as **4-byte transfers**:
 
 Format: `[mode, brightness, speed]`
 
-### Modes
-- `0`: Off
-- `1`: Static Color
-- `2`: Breathing
-- `3`: Neon (Smooth Spectrum)
-- `4`: Blink
-- `5`: Double Blink
-- `6`: Color Shift
-- `7`: Meteor
-- `8`: Ripple
-- `9`: Seven Colors Cycle
+### Hardware Effects (7900 XTX V2)
+- `0`: **Off**
+- `1`: **Static Color** (Uses Master Offset 48)
+- `2`: **Breathing** (Uses Master Offset 48)
+- `3`: **Neon** (Spectrum Cycle across color range)
+- `4`: **Blink** (Single flash pulse effect)
+- `5`: **Double Blink** (Double flash pulse effect)
+- `7`: **Meteor** (Dynamic beam effect across face of GPU)
+- `8`: **Ripple** (Dynamic wave expansion across waterblock)
 
 ### Brightness Range
 - `0`: OFF
@@ -71,4 +69,4 @@ Format: `[mode, brightness, speed]`
 
 - ⚠️ **DO NOT write to Register `0xCC`**: Writing to register `0xCC` causes the microcontroller to enter an unrecoverable hardware lockup state. Recovery requires a complete system shutdown and PSU power discharge.
 - ⏱️ **Timing & Delays**: Always insert a **50ms pause** (`time.sleep(0.05)`) between consecutive I2C write transactions to prevent buffer overrun on the microcontroller.
-- 🔒 **Bus Ownership**: Ensure no other I2C software (such as OpenRGB or proprietary daemons) is scanning `/dev/i2c-7` during writes.
+- 🔒 **Bus Ownership**: Ensure no other I2C software is actively writing to `/dev/i2c-7` during transactions.

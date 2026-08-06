@@ -11,7 +11,15 @@ Reverse-engineered hardware protocol implementation for the V2 I2C RGB microcont
 - 🟢 **Auto-Detection**: Automatically locates the `AMDGPU DM i2c OEM bus` across systems and reboots.
 - 🎨 **Full Color Control**: Set any static RGB color or hex color (`#FF00FF`, `#00FFFF`, etc.).
 - 💡 **Full Brightness**: Supports the full `0–255` brightness range.
-- 🌊 **Effects Support**: Static and Breathing lighting modes.
+- 🌊 **8 Built-in Hardware Effects**:
+  - `static`: Solid continuous color.
+  - `breathing`: Gentle pulse fade in/out.
+  - `neon`: Smooth spectrum cycle across the full color range.
+  - `blink`: Single flashing pulse effect.
+  - `double-blink`: Double flashing pulse effect.
+  - `meteor`: Dynamic light beam shooting across the face of the GPU.
+  - `ripple`: Dynamic wave expansion across the waterblock.
+  - `off`: Turn off all LEDs.
 - 🎯 **Individual LED Addressing**: Address any of the **17 individual LEDs** (0 to 16) on the EKWB waterblock.
 - ⚙️ **Master Offset Support**: Uses Master Offset 48 (`0x30`) for simultaneous, flicker-free updates.
 - 🔒 **Safe Execution**: Includes guardrails to prevent writing to hazardous registers (such as `0xCC`).
@@ -51,10 +59,10 @@ cd liquid_devil_linux_rgb
 pip install .
 ```
 
-Or run directly without installation:
+Or rebuild the Arch Linux package:
 
 ```bash
-python3 liquid_devil_rgb.py --help
+makepkg -si
 ```
 
 ---
@@ -70,18 +78,25 @@ liquid-devil-rgb status
 # Turn off all RGB LEDs
 liquid-devil-rgb off
 
-# Set static color (R G B)
+# Set static color (R G B or --hex)
 liquid-devil-rgb static 0 0 255          # Pure Blue
-liquid-devil-rgb static 255 0 0          # Pure Red
-liquid-devil-rgb static 0 255 0          # Pure Green
-liquid-devil-rgb static 255 255 255      # Bright White
-
-# Set static color using Hex code
 liquid-devil-rgb static --hex #FF00FF    # Purple / Magenta
-liquid-devil-rgb static --hex #00FFFF    # Cyan
 
-# Set breathing mode
-liquid-devil-rgb breathing 255 0 255 --speed 50
+# Set breathing effect
+liquid-devil-rgb breathing 255 0 0 --speed 50
+
+# Set spectrum cycle / neon effect
+liquid-devil-rgb neon --speed 50
+
+# Set flashing blink / double-blink
+liquid-devil-rgb blink 0 255 0 --speed 50
+liquid-devil-rgb double-blink 0 255 255 --speed 50
+
+# Set dynamic meteor beam effect
+liquid-devil-rgb meteor 255 0 255 --speed 20
+
+# Set dynamic ripple wave effect
+liquid-devil-rgb ripple 255 255 0 --speed 30
 
 # Control individual LED (0 to 16)
 liquid-devil-rgb led 0 255 0 0           # Set LED 0 (front right) to Red

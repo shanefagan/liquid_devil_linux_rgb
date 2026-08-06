@@ -193,21 +193,59 @@ class LiquidDevilRGB:
         """Turn off all RGB LEDs."""
         return self.set_settings(0, 0, 0)
 
-    def set_static(self, r: int, g: int, b: int, brightness: int = 255) -> bool:
-        """Set static color across all LEDs at specified brightness."""
+    def set_mode(
+        self,
+        mode: int,
+        r: int = 0,
+        g: int = 0,
+        b: int = 0,
+        brightness: int = 255,
+        speed: int = 255,
+    ) -> bool:
+        """Apply a hardware lighting mode (1-9) with target color, brightness, and speed."""
         self.turn_off()
         time.sleep(0.2)
-        self.set_all_color(r, g, b)
-        return self.set_settings(1, brightness, 255)
+        if mode in (1, 2, 4, 5, 7, 8):  # Modes requiring color setup
+            self.set_all_color(r, g, b)
+        return self.set_settings(mode, brightness, speed)
+
+    def set_static(self, r: int, g: int, b: int, brightness: int = 255) -> bool:
+        """Set static color across all LEDs at specified brightness (Mode 1)."""
+        return self.set_mode(1, r, g, b, brightness=brightness, speed=255)
 
     def set_breathing(
         self, r: int, g: int, b: int, brightness: int = 255, speed: int = 50
     ) -> bool:
-        """Set breathing mode with target color."""
-        self.turn_off()
-        time.sleep(0.2)
-        self.set_all_color(r, g, b)
-        return self.set_settings(2, brightness, speed)
+        """Set breathing effect with target color (Mode 2)."""
+        return self.set_mode(2, r, g, b, brightness=brightness, speed=speed)
+
+    def set_neon(self, brightness: int = 255, speed: int = 50) -> bool:
+        """Set spectrum cycle / neon effect across color range (Mode 3)."""
+        return self.set_mode(3, brightness=brightness, speed=speed)
+
+    def set_blink(
+        self, r: int, g: int, b: int, brightness: int = 255, speed: int = 50
+    ) -> bool:
+        """Set single flash pulse effect with target color (Mode 4)."""
+        return self.set_mode(4, r, g, b, brightness=brightness, speed=speed)
+
+    def set_double_blink(
+        self, r: int, g: int, b: int, brightness: int = 255, speed: int = 50
+    ) -> bool:
+        """Set double flash pulse effect with target color (Mode 5)."""
+        return self.set_mode(5, r, g, b, brightness=brightness, speed=speed)
+
+    def set_meteor(
+        self, r: int, g: int, b: int, brightness: int = 255, speed: int = 20
+    ) -> bool:
+        """Set meteor beam effect across face of GPU (Mode 7)."""
+        return self.set_mode(7, r, g, b, brightness=brightness, speed=speed)
+
+    def set_ripple(
+        self, r: int, g: int, b: int, brightness: int = 255, speed: int = 30
+    ) -> bool:
+        """Set ripple wave expansion effect across waterblock (Mode 8)."""
+        return self.set_mode(8, r, g, b, brightness=brightness, speed=speed)
 
     def get_status(
         self,
@@ -235,6 +273,35 @@ def hex_color(val: str) -> tuple[int, int, int]:
     )
 
 
+def add_color_args(subparser: argparse.ArgumentParser) -> None:
+    """Helper to add standard R, G, B, and --hex arguments to a command subparser."""
+    subparser.add_argument("r", type=int, nargs="?", help="Red (0-255)")
+    subparser.add_argument("g", type=int, nargs="?", help="Green (0-255)")
+    subparser.add_argument("b", type=int, nargs="?", help="Blue (0-255)")
+    subparser.add_argument("--hex", type=hex_color, help="Hex color (e.g. #FF00FF)")
+    subparser.add_argument(
+        "--brightness",
+        type=int,
+        default=255,
+        help="Brightness (0-255, default: 255)",
+    )
+
+
+def parse_rgb(args: argparse.Namespace) -> tuple[int, int, int]:
+    """Extract (R, G, B) from CLI arguments."""
+    if getattr(args, "hex", None):
+        return args.hex
+    r, g, b = (
+        getattr(args, "r", None),
+        getattr(args, "g", None),
+        getattr(args, "b", None),
+    )
+    if r is not None and g is not None and b is not None:
+        return r, g, b
+    print("Error: Specify R G B values (0-255) or --hex color", file=sys.stderr)
+    sys.exit(1)
+
+
 def main() -> None:
     """CLI entry point for liquid-devil-rgb."""
     parser = argparse.ArgumentParser(
@@ -252,41 +319,71 @@ def main() -> None:
     # Command: off
     subparsers.add_parser("off", help="Turn all LEDs off")
 
+    # Command: status
+    subparsers.add_parser("status", help="Read current RGB controller status")
+
     # Command: static
-    p_static = subparsers.add_parser("static", help="Set static color")
-    p_static.add_argument("r", type=int, nargs="?", help="Red (0-255)")
-    p_static.add_argument("g", type=int, nargs="?", help="Green (0-255)")
-    p_static.add_argument("b", type=int, nargs="?", help="Blue (0-255)")
-    p_static.add_argument("--hex", type=hex_color, help="Hex color (e.g. #00FF00)")
-    p_static.add_argument(
-        "--brightness",
-        type=int,
-        default=255,
-        help="Brightness (0-255, default: 255)",
-    )
+    p_static = subparsers.add_parser("static", help="Set solid static color (Mode 1)")
+    add_color_args(p_static)
 
     # Command: breathing
-    p_breath = subparsers.add_parser("breathing", help="Set breathing mode color")
-    p_breath.add_argument("r", type=int, nargs="?", help="Red (0-255)")
-    p_breath.add_argument("g", type=int, nargs="?", help="Green (0-255)")
-    p_breath.add_argument("b", type=int, nargs="?", help="Blue (0-255)")
-    p_breath.add_argument("--hex", type=hex_color, help="Hex color (e.g. #FF00FF)")
-    p_breath.add_argument(
-        "--brightness", type=int, default=255, help="Brightness (0-255)"
-    )
+    p_breath = subparsers.add_parser("breathing", help="Set breathing effect (Mode 2)")
+    add_color_args(p_breath)
     p_breath.add_argument(
         "--speed", type=int, default=50, help="Animation speed (0-255)"
     )
 
+    # Command: neon
+    p_neon = subparsers.add_parser(
+        "neon", help="Set spectrum cycle / neon effect (Mode 3)"
+    )
+    p_neon.add_argument(
+        "--brightness", type=int, default=255, help="Brightness (0-255)"
+    )
+    p_neon.add_argument("--speed", type=int, default=50, help="Speed (0-255)")
+
+    # Command: blink
+    p_blink = subparsers.add_parser(
+        "blink", help="Set single flash pulse effect (Mode 4)"
+    )
+    add_color_args(p_blink)
+    p_blink.add_argument(
+        "--speed", type=int, default=50, help="Animation speed (0-255)"
+    )
+
+    # Command: double-blink
+    p_dblink = subparsers.add_parser(
+        "double-blink", help="Set double flash pulse effect (Mode 5)"
+    )
+    add_color_args(p_dblink)
+    p_dblink.add_argument(
+        "--speed", type=int, default=50, help="Animation speed (0-255)"
+    )
+
+    # Command: meteor
+    p_meteor = subparsers.add_parser(
+        "meteor", help="Set meteor beam effect across face (Mode 7)"
+    )
+    add_color_args(p_meteor)
+    p_meteor.add_argument(
+        "--speed", type=int, default=20, help="Animation speed (0-255)"
+    )
+
+    # Command: ripple
+    p_ripple = subparsers.add_parser(
+        "ripple", help="Set ripple wave expansion effect (Mode 8)"
+    )
+    add_color_args(p_ripple)
+    p_ripple.add_argument(
+        "--speed", type=int, default=30, help="Animation speed (0-255)"
+    )
+
     # Command: led
-    p_led = subparsers.add_parser("led", help="Set individual LED color")
+    p_led = subparsers.add_parser("led", help="Set individual LED color (0 to 16)")
     p_led.add_argument("idx", type=int, help="LED index (0 to 16)")
     p_led.add_argument("r", type=int, help="Red (0-255)")
     p_led.add_argument("g", type=int, help="Green (0-255)")
     p_led.add_argument("b", type=int, help="Blue (0-255)")
-
-    # Command: status
-    subparsers.add_parser("status", help="Read current RGB controller status")
 
     args = parser.parse_args()
 
@@ -310,10 +407,8 @@ def main() -> None:
                     3: "neon",
                     4: "blink",
                     5: "double_blink",
-                    6: "color_shift",
                     7: "meteor",
                     8: "ripple",
-                    9: "seven_colors",
                 }
                 mode_str = modes.get(settings[0], f"unknown({settings[0]})")
                 print(
@@ -322,28 +417,45 @@ def main() -> None:
             if color:
                 print(f"  LED 0 Color: R={color[0]}, G={color[1]}, B={color[2]}")
 
-        elif args.command in ("static", "breathing"):
-            if args.hex:
-                r, g, b = args.hex
-            elif args.r is not None and args.g is not None and args.b is not None:
-                r, g, b = args.r, args.g, args.b
-            else:
-                print(
-                    "Error: Specify R G B values or --hex color",
-                    file=sys.stderr,
-                )
-                sys.exit(1)
+        elif args.command == "static":
+            r, g, b = parse_rgb(args)
+            print(
+                f"[*] Setting static color: R={r} G={g} B={b} (Brightness={args.brightness})"
+            )
+            dev.set_static(r, g, b, brightness=args.brightness)
 
-            if args.command == "static":
-                print(
-                    f"[*] Setting static color: R={r} G={g} B={b} (Brightness={args.brightness})"
-                )
-                dev.set_static(r, g, b, brightness=args.brightness)
-            else:
-                print(
-                    f"[*] Setting breathing color: R={r} G={g} B={b} (Speed={args.speed})"
-                )
-                dev.set_breathing(r, g, b, brightness=args.brightness, speed=args.speed)
+        elif args.command == "breathing":
+            r, g, b = parse_rgb(args)
+            print(
+                f"[*] Setting breathing color: R={r} G={g} B={b} (Speed={args.speed})"
+            )
+            dev.set_breathing(r, g, b, brightness=args.brightness, speed=args.speed)
+
+        elif args.command == "neon":
+            print(f"[*] Setting spectrum cycle / neon effect (Speed={args.speed})")
+            dev.set_neon(brightness=args.brightness, speed=args.speed)
+
+        elif args.command == "blink":
+            r, g, b = parse_rgb(args)
+            print(f"[*] Setting blink effect: R={r} G={g} B={b} (Speed={args.speed})")
+            dev.set_blink(r, g, b, brightness=args.brightness, speed=args.speed)
+
+        elif args.command == "double-blink":
+            r, g, b = parse_rgb(args)
+            print(
+                f"[*] Setting double-blink effect: R={r} G={g} B={b} (Speed={args.speed})"
+            )
+            dev.set_double_blink(r, g, b, brightness=args.brightness, speed=args.speed)
+
+        elif args.command == "meteor":
+            r, g, b = parse_rgb(args)
+            print(f"[*] Setting meteor effect: R={r} G={g} B={b} (Speed={args.speed})")
+            dev.set_meteor(r, g, b, brightness=args.brightness, speed=args.speed)
+
+        elif args.command == "ripple":
+            r, g, b = parse_rgb(args)
+            print(f"[*] Setting ripple effect: R={r} G={g} B={b} (Speed={args.speed})")
+            dev.set_ripple(r, g, b, brightness=args.brightness, speed=args.speed)
 
         elif args.command == "led":
             print(f"[*] Setting LED {args.idx} color: R={args.r} G={args.g} B={args.b}")
