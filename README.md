@@ -1,6 +1,6 @@
 # Liquid Devil RGB Control for Linux
 
-A standalone CLI tool, Python library, and **OpenRGB SDK Server** for controlling the RGB lighting on the **PowerColor Radeon RX 7900 XTX Liquid Devil** graphics card under Linux via I2C.
+A standalone CLI tool, Python library, and **OpenRGB Real-Time Sync Client** for controlling the RGB lighting on the **PowerColor Radeon RX 7900 XTX Liquid Devil** graphics card under Linux via I2C.
 
 Reverse-engineered hardware protocol implementation for the V2 I2C RGB microcontroller at address `0x22`.
 
@@ -8,7 +8,8 @@ Reverse-engineered hardware protocol implementation for the V2 I2C RGB microcont
 
 ## Features
 
-- 🌐 **OpenRGB SDK Server Mode**: Emulates an OpenRGB SDK Server (port `6742`) so OpenRGB-compatible apps (**Artemis**, **SignalRGB**, **Audio Visualizers**, **OpenRGB GUI**) can control the GPU in real-time!
+- 🔄 **OpenRGB Sync Client Mode**: Connects as an SDK client to an active OpenRGB Server (`127.0.0.1:6742`) and **syncs your Liquid Devil GPU to match your motherboard, RAM, or PC theme in real-time at 30 FPS!**
+- 🌐 **OpenRGB SDK Server Mode**: Optional built-in SDK Server (port `6742`) for third-party tools (Artemis, SignalRGB).
 - 🟢 **Auto-Detection**: Automatically locates the `AMDGPU DM i2c OEM bus` across systems and reboots.
 - 🎨 **Full Color Control**: Set any static RGB color or hex color (`#FF00FF`, `#00FFFF`, etc.).
 - 💡 **Full Brightness**: Supports the full `0–255` brightness range.
@@ -68,34 +69,33 @@ makepkg -si
 
 ---
 
-## OpenRGB SDK Server Mode (Real-Time Apps Integration)
+## OpenRGB Real-Time Sync (Recommended)
 
-`liquid-devil-rgb` includes an **OpenRGB SDK Server daemon**. Running this daemon opens port `6742` and exposes your Liquid Devil GPU to any software that supports OpenRGB SDK (e.g. OpenRGB GUI, Artemis, SignalRGB, Audio Visualizers).
+When you run OpenRGB to control your motherboard, RAM, or PC lighting:
 
-To start the SDK Server:
+1. Enable **SDK Server** in OpenRGB (OpenRGB GUI -> Settings -> Start Server on port `6742`).
+2. Run `liquid-devil-rgb openrgb-sync`:
 
 ```bash
-liquid-devil-rgb sdk-server
+liquid-devil-rgb openrgb-sync
 ```
 
-Once running, open **OpenRGB GUI** (or Artemis / SignalRGB), connect to `127.0.0.1:6742` under the **SDK Client** tab, and your **PowerColor RX 7900 XTX Liquid Devil** will appear as an active GPU device!
+Your Liquid Devil GPU will connect to OpenRGB, read the active color theme, and **mirror OpenRGB in real-time at 30 FPS!**
 
 ---
 
-## Systemd Service (Automated SDK Server or Startup Color)
+## Systemd Service (Auto-Sync to OpenRGB at Boot)
 
-### Option A: Run OpenRGB SDK Server at Boot (Recommended)
-
-`/etc/systemd/system/liquid-devil-sdk-server.service`:
+To automatically sync your Liquid Devil GPU to OpenRGB whenever your system boots, create `/etc/systemd/system/liquid-devil-sync.service`:
 
 ```ini
 [Unit]
-Description=PowerColor Liquid Devil 7900 XTX OpenRGB SDK Server Daemon
+Description=PowerColor Liquid Devil 7900 XTX OpenRGB Sync Daemon
 After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/liquid-devil-rgb sdk-server
+ExecStart=/usr/bin/liquid-devil-rgb openrgb-sync
 Restart=always
 RestartSec=3
 
@@ -107,27 +107,7 @@ Enable and start:
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable --now liquid-devil-sdk-server.service
-```
-
----
-
-### Option B: Set a Fixed Color at Boot
-
-`/etc/systemd/system/liquid-devil-rgb.service`:
-
-```ini
-[Unit]
-Description=Set PowerColor Liquid Devil 7900 XTX RGB Color
-After=multi-user.target
-
-[Service]
-Type=oneshot
-ExecStart=/usr/bin/liquid-devil-rgb static 0 0 255
-RemainAfterExit=yes
-
-[Install]
-WantedBy=multi-user.target
+sudo systemctl enable --now liquid-devil-sync.service
 ```
 
 ---
@@ -135,11 +115,11 @@ WantedBy=multi-user.target
 ## Command Line Interface Usage
 
 ```bash
+# Sync GPU to running OpenRGB server in real-time (30 FPS)
+liquid-devil-rgb openrgb-sync
+
 # Read RGB status and mode
 liquid-devil-rgb status
-
-# Run OpenRGB SDK Server (port 6742)
-liquid-devil-rgb sdk-server
 
 # Turn off all RGB LEDs
 liquid-devil-rgb off
