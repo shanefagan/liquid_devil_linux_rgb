@@ -1,6 +1,6 @@
 # Liquid Devil RGB Control for Linux
 
-A standalone CLI tool, Python library, and **OpenRGB Real-Time Sync Client** for controlling the RGB lighting on the **PowerColor Radeon RX 7900 XTX Liquid Devil** graphics card under Linux via I2C.
+A standalone CLI tool, Python library, and OpenRGB Real-Time Sync Client for controlling RGB lighting on the PowerColor Radeon RX 7900 XTX Liquid Devil graphics card under Linux via I2C.
 
 Reverse-engineered hardware protocol implementation for the V2 I2C RGB microcontroller at address `0x22`.
 
@@ -8,24 +8,23 @@ Reverse-engineered hardware protocol implementation for the V2 I2C RGB microcont
 
 ## Features
 
-- 🔄 **OpenRGB Sync Client Mode**: Connects as an SDK client to an active OpenRGB Server (`127.0.0.1:6742`) and **syncs your Liquid Devil GPU to match your motherboard, RAM, or PC theme in real-time at 30 FPS!**
-- 🌐 **OpenRGB SDK Server Mode**: Optional built-in SDK Server (port `6742`) for third-party tools (Artemis, SignalRGB).
-- 🟢 **Auto-Detection**: Automatically locates the `AMDGPU DM i2c OEM bus` across systems and reboots.
-- 🎨 **Full Color Control**: Set any static RGB color or hex color (`#FF00FF`, `#00FFFF`, etc.).
-- 💡 **Full Brightness**: Supports the full `0–255` brightness range.
-- 🌊 **8 Built-in Hardware Effects**:
+- OpenRGB Sync Client Mode: Connects as an SDK client to an active OpenRGB Server (`127.0.0.1:6742`) and syncs GPU lighting to match motherboard, RAM, or PC theme in real-time at 30 FPS.
+- OpenRGB SDK Server Mode: Optional built-in SDK Server (port `6742`) for third-party tools.
+- Auto-Detection: Automatically locates the `AMDGPU DM i2c OEM bus` across systems and reboots.
+- Full Color Control: Set any static RGB color or hex color (`#FF00FF`, `#00FFFF`, etc.).
+- Full Brightness: Supports full `0-255` brightness range.
+- 8 Built-in Hardware Effects:
   - `static`: Solid continuous color.
   - `breathing`: Gentle pulse fade in/out.
-  - `neon`: Smooth spectrum cycle across the full color range.
+  - `neon`: Smooth spectrum cycle across full color range.
   - `blink`: Single flashing pulse effect.
   - `double-blink`: Double flashing pulse effect.
-  - `meteor`: Dynamic light beam shooting across the face of the GPU.
-  - `ripple`: Dynamic wave expansion across the waterblock.
+  - `meteor`: Dynamic light beam shooting across GPU face.
+  - `ripple`: Dynamic wave expansion across waterblock.
   - `off`: Turn off all LEDs.
-- 🎯 **Individual LED Addressing**: Address any of the **17 individual LEDs** (0 to 16) on the EKWB waterblock.
-- ⚙️ **Master Offset Support**: Uses Master Offset 48 (`0x30`) for simultaneous, flicker-free updates up to **33 FPS**.
-- 🔒 **Safe Execution**: Includes guardrails to prevent writing to hazardous registers (such as `0xCC`).
-- ⚡ **Zero Dependencies**: Standard Python 3 library (`ctypes`, `fcntl`, `sys`, `socket`) — no third-party packages required!
+- Individual LED Addressing: Address any of the 17 individual LEDs (0 to 16) on the EKWB waterblock.
+- Master Offset Support: Uses Master Offset 48 (`0x30`) for simultaneous updates up to 33 FPS.
+- Zero Dependencies: Standard Python 3 library (`ctypes`, `fcntl`, `sys`, `socket`).
 
 ---
 
@@ -39,13 +38,13 @@ Make sure the Linux `i2c-dev` module is loaded:
 sudo modprobe i2c-dev
 ```
 
-To make `i2c-dev` load automatically on boot:
+To load `i2c-dev` automatically on boot:
 
 ```bash
 echo "i2c-dev" | sudo tee /etc/modules-load.d/i2c-dev.conf
 ```
 
-Ensure your user is in the `i2c` group for non-root access:
+Ensure your user is in the `i2c` group:
 
 ```bash
 sudo usermod -aG i2c $USER
@@ -53,57 +52,28 @@ sudo usermod -aG i2c $USER
 
 ### Install Package
 
-Clone the repository and install:
+Clone the repository and install with `uv`:
 
 ```bash
 git clone https://github.com/shanefagan/liquid_devil_linux_rgb.git
 cd liquid_devil_linux_rgb
-pip install .
+uv tool install .
 ```
 
-Or rebuild the Arch Linux package:
+Or build the Arch Linux package:
 
 ```bash
+cd packaging/arch
 makepkg -si
 ```
 
 ---
 
-## OpenRGB Real-Time Sync (Recommended)
+## Systemd Service (OpenRGB Sync Client)
 
-When you run OpenRGB to control your motherboard, RAM, or PC lighting:
+The package installs `liquid-devil-sync.service` to `/usr/lib/systemd/system/liquid-devil-sync.service` disabled by default.
 
-1. Enable **SDK Server** in OpenRGB (OpenRGB GUI -> Settings -> Start Server on port `6742`).
-2. Run `liquid-devil-rgb openrgb-sync`:
-
-```bash
-liquid-devil-rgb openrgb-sync
-```
-
-Your Liquid Devil GPU will connect to OpenRGB, read the active color theme, and **mirror OpenRGB in real-time at 30 FPS!**
-
----
-
-## Systemd Service (Auto-Sync to OpenRGB at Boot)
-
-To automatically sync your Liquid Devil GPU to OpenRGB whenever your system boots, create `/etc/systemd/system/liquid-devil-sync.service`:
-
-```ini
-[Unit]
-Description=PowerColor Liquid Devil 7900 XTX OpenRGB Sync Daemon
-After=network.target
-
-[Service]
-Type=simple
-ExecStart=/usr/bin/liquid-devil-rgb openrgb-sync
-Restart=always
-RestartSec=3
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Enable and start:
+To enable and start the OpenRGB sync service at boot:
 
 ```bash
 sudo systemctl daemon-reload
@@ -159,9 +129,9 @@ liquid-devil-rgb led 0 255 0 0           # Set LED 0 (front right) to Red
 | **Identification (Reg `0x90`)** | `0x00 0x11 0x00` | 7900 XTX V2 Controller |
 | **Settings Offset** | `1` (`0x01`) | `[mode, brightness, speed]` |
 | **Master All-LED Offset** | `48` (`0x30`) | Sets entire card simultaneously |
-| **Individual LED Offsets** | `26` to `42` (`0x1A`–`0x2A`) | 17 LEDs (0 to 16) |
+| **Individual LED Offsets** | `26` to `42` (`0x1A`-`0x2A`) | 17 LEDs (0 to 16) |
 
-*See `PROTOCOL.md` for full technical specification.*
+See `PROTOCOL.md` for technical specification.
 
 ---
 

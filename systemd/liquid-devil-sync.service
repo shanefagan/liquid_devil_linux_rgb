@@ -1,0 +1,12 @@
+[Unit]
+Description=PowerColor Liquid Devil 7900 XTX OpenRGB Sync Daemon
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/liquid-devil-rgb openrgb-sync
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

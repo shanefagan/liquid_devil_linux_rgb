@@ -21,7 +21,8 @@ package() {
   python_ver=$(python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
   site_dir="$pkgdir/usr/lib/python${python_ver}/site-packages"
   bin_dir="$pkgdir/usr/bin"
-  mkdir -p "$site_dir" "$bin_dir"
+  service_dir="$pkgdir/usr/lib/systemd/system"
+  mkdir -p "$site_dir" "$bin_dir" "$service_dir"
 
   cp -r src/liquid_devil_rgb "$site_dir/"
   
@@ -33,6 +34,7 @@ if __name__ == '__main__':
 EOF
   chmod +x "$bin_dir/liquid-devil-rgb"
 
+  install -Dm644 systemd/liquid-devil-sync.service "$service_dir/liquid-devil-sync.service"
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
   install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
   install -Dm644 PROTOCOL.md "$pkgdir/usr/share/doc/$pkgname/PROTOCOL.md"

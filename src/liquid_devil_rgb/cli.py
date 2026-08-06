@@ -296,13 +296,11 @@ def run_openrgb_sync_client(
 ) -> None:
     """Connect as a client to an OpenRGB SDK Server (port 6742) and mirror active colors to GPU."""
     interval = 1.0 / max(1, min(60, fps))
-    print("================================================================")
-    print("   PowerColor RX 7900 XTX Liquid Devil — OpenRGB Sync Client    ")
-    print("================================================================")
-    print(f"[*] Connecting to OpenRGB Server at {host}:{port}...")
-    print(f"[*] Target Device Index: {device_idx}")
-    print(f"[*] Sync Rate: ~{fps} FPS ({interval*1000:.1f}ms interval)")
-    print("[*] Press Ctrl+C to stop sync daemon.\n")
+    print("PowerColor RX 7900 XTX Liquid Devil - OpenRGB Sync Client")
+    print(f"Connecting to OpenRGB Server at {host}:{port}")
+    print(f"Target Device Index: {device_idx}")
+    print(f"Sync Rate: ~{fps} FPS ({interval*1000:.1f}ms interval)")
+    print("Press Ctrl+C to stop sync daemon.\n")
 
     with LiquidDevilRGB(bus_path=bus_path) as dev:
         dev.set_static(0, 0, 255)  # Init static mode
@@ -319,7 +317,7 @@ def run_openrgb_sync_client(
                 hdr = struct.pack("<4sIII", b"ORGB", 0, NET_PACKET_TYPE_SET_CLIENT_NAME, len(name_payload))
                 s.sendall(hdr + name_payload)
 
-                print(f"[+] Connected to OpenRGB Server at {host}:{port}!")
+                print(f"Connected to OpenRGB Server at {host}:{port}")
 
                 while True:
                     # Request controller data for target device_idx
@@ -352,10 +350,10 @@ def run_openrgb_sync_client(
                     time.sleep(interval)
 
             except (TimeoutError, ConnectionResetError, BrokenPipeError, OSError) as e:
-                print(f"[-] Disconnected from OpenRGB server ({e}). Retrying in 3 seconds...", file=sys.stderr)
+                print(f"Disconnected from OpenRGB server ({e}). Retrying in 3 seconds...", file=sys.stderr)
                 time.sleep(3.0)
             except KeyboardInterrupt:
-                print("\n[*] Stopping OpenRGB Sync daemon...")
+                print("\nStopping OpenRGB Sync daemon.")
                 break
 
 
@@ -424,7 +422,7 @@ def handle_sdk_client(
     client_sock: socket.socket, client_addr: tuple[str, int], dev: LiquidDevilRGB
 ) -> None:
     """Handle an incoming OpenRGB SDK client connection."""
-    print(f"[*] OpenRGB SDK Client connected from {client_addr[0]}:{client_addr[1]}")
+    print(f"OpenRGB SDK Client connected from {client_addr[0]}:{client_addr[1]}")
     client_sock.settimeout(5.0)
     protocol_version = 3
 
@@ -438,7 +436,7 @@ def handle_sdk_client(
 
             magic, _dev_idx, pkt_type, pkt_len = struct.unpack("<4sIII", header)
             if magic != b"ORGB":
-                print(f"[-] Invalid SDK magic bytes: {magic!r}", file=sys.stderr)
+                print(f"Invalid SDK magic bytes: {magic!r}", file=sys.stderr)
                 break
 
             payload = b""
@@ -466,7 +464,7 @@ def handle_sdk_client(
                     try:
                         name_len = struct.unpack("<H", payload[:2])[0]
                         client_name = payload[2 : 2 + name_len].decode("utf-8", errors="ignore").rstrip("\x00")
-                        print(f"[*] OpenRGB SDK Client Name set to: '{client_name}'")
+                        print(f"OpenRGB SDK Client Name set to: '{client_name}'")
                     except (struct.error, UnicodeDecodeError):
                         pass
 
@@ -494,7 +492,7 @@ def handle_sdk_client(
         pass
     finally:
         client_sock.close()
-        print(f"[*] OpenRGB SDK Client disconnected: {client_addr[0]}:{client_addr[1]}")
+        print(f"OpenRGB SDK Client disconnected: {client_addr[0]}:{client_addr[1]}")
 
 
 def run_sdk_server(host: str = "0.0.0.0", port: int = 6742, bus_path: str | None = None) -> None:
@@ -505,12 +503,10 @@ def run_sdk_server(host: str = "0.0.0.0", port: int = 6742, bus_path: str | None
     try:
         server_sock.bind((host, port))
         server_sock.listen(5)
-        print("================================================================")
-        print("   PowerColor RX 7900 XTX Liquid Devil — OpenRGB SDK Server     ")
-        print("================================================================")
-        print(f"[*] Listening on {host}:{port} (OpenRGB SDK Protocol)")
-        print(f"[*] I2C Bus: {bus_path or find_oem_i2c_bus()}")
-        print("[*] Press Ctrl+C to stop server.\n")
+        print("PowerColor RX 7900 XTX Liquid Devil - OpenRGB SDK Server")
+        print(f"Listening on {host}:{port} (OpenRGB SDK Protocol)")
+        print(f"I2C Bus: {bus_path or find_oem_i2c_bus()}")
+        print("Press Ctrl+C to stop server.\n")
 
         with LiquidDevilRGB(bus_path=bus_path) as dev:
             dev.set_static(0, 0, 255)
@@ -524,7 +520,7 @@ def run_sdk_server(host: str = "0.0.0.0", port: int = 6742, bus_path: str | None
                 t.start()
 
     except KeyboardInterrupt:
-        print("\n[*] Stopping OpenRGB SDK Server...")
+        print("\nStopping OpenRGB SDK Server.")
     finally:
         server_sock.close()
 
@@ -655,11 +651,11 @@ def main() -> None:
 
     with LiquidDevilRGB(bus_path=args.bus) as dev:
         if args.command == "off":
-            print("[*] Turning LEDs off...")
+            print("Turning LEDs off...")
             dev.turn_off()
 
         elif args.command == "status":
-            print(f"[*] Bus: {dev.bus_path}")
+            print(f"Bus: {dev.bus_path}")
             settings, color = dev.get_status()
             if settings:
                 modes = {
@@ -681,40 +677,40 @@ def main() -> None:
 
         elif args.command == "static":
             r, g, b = parse_rgb(args)
-            print(f"[*] Setting static color: R={r} G={g} B={b} (Brightness={args.brightness})")
+            print(f"Setting static color: R={r} G={g} B={b} (Brightness={args.brightness})")
             dev.set_static(r, g, b, brightness=args.brightness)
 
         elif args.command == "breathing":
             r, g, b = parse_rgb(args)
-            print(f"[*] Setting breathing color: R={r} G={g} B={b} (Speed={args.speed})")
+            print(f"Setting breathing color: R={r} G={g} B={b} (Speed={args.speed})")
             dev.set_breathing(r, g, b, brightness=args.brightness, speed=args.speed)
 
         elif args.command == "neon":
-            print(f"[*] Setting spectrum cycle / neon effect (Speed={args.speed})")
+            print(f"Setting spectrum cycle / neon effect (Speed={args.speed})")
             dev.set_neon(brightness=args.brightness, speed=args.speed)
 
         elif args.command == "blink":
             r, g, b = parse_rgb(args)
-            print(f"[*] Setting blink effect: R={r} G={g} B={b} (Speed={args.speed})")
+            print(f"Setting blink effect: R={r} G={g} B={b} (Speed={args.speed})")
             dev.set_blink(r, g, b, brightness=args.brightness, speed=args.speed)
 
         elif args.command == "double-blink":
             r, g, b = parse_rgb(args)
-            print(f"[*] Setting double-blink effect: R={r} G={g} B={b} (Speed={args.speed})")
+            print(f"Setting double-blink effect: R={r} G={g} B={b} (Speed={args.speed})")
             dev.set_double_blink(r, g, b, brightness=args.brightness, speed=args.speed)
 
         elif args.command == "meteor":
             r, g, b = parse_rgb(args)
-            print(f"[*] Setting meteor effect: R={r} G={g} B={b} (Speed={args.speed})")
+            print(f"Setting meteor effect: R={r} G={g} B={b} (Speed={args.speed})")
             dev.set_meteor(r, g, b, brightness=args.brightness, speed=args.speed)
 
         elif args.command == "ripple":
             r, g, b = parse_rgb(args)
-            print(f"[*] Setting ripple effect: R={r} G={g} B={b} (Speed={args.speed})")
+            print(f"Setting ripple effect: R={r} G={g} B={b} (Speed={args.speed})")
             dev.set_ripple(r, g, b, brightness=args.brightness, speed=args.speed)
 
         elif args.command == "led":
-            print(f"[*] Setting LED {args.idx} color: R={args.r} G={args.g} B={args.b}")
+            print(f"Setting LED {args.idx} color: R={args.r} G={args.g} B={args.b}")
             dev.set_led_color(args.idx, args.r, args.g, args.b)
             dev.set_settings(1, 255, 255)
 
