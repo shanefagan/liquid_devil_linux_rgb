@@ -23,4 +23,7 @@ keywords = ["gpu", "rgb", "powercolor", "liquid-devil", "rx7900xtx", "i2c", "lin
 dependencies = []
 
 [project.scripts]
-liquid-devil-rgb = "liquid_devil_rgb:main"
+liquid-devil-rgb = "liquid_devil_rgb.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

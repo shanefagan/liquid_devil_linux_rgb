@@ -314,7 +314,7 @@ def run_openrgb_sync_client(
                 s.connect((host, port))
 
                 # Set client name
-                name_bytes = b"Liquid Devil GPU Sync" + b"\x00"
+                name_bytes = b"Liquid Devil GPU Sync\x00"
                 name_payload = struct.pack("<H", len(name_bytes)) + name_bytes
                 hdr = struct.pack("<4sIII", b"ORGB", 0, NET_PACKET_TYPE_SET_CLIENT_NAME, len(name_payload))
                 s.sendall(hdr + name_payload)
@@ -342,8 +342,7 @@ def run_openrgb_sync_client(
                         payload += chunk
 
                     # Parse color entries from end of payload
-                    # In OpenRGB SDK protocol, colors are 4-byte BGRA/RGBA structs: [R, G, B, 0]
-                    # So the last color entry is at offsets -4, -3, -2 (R, G, B)
+                    # OpenRGB SDK protocol colors are 4-byte structs: [R, G, B, 0]
                     if len(payload) >= 4:
                         r = payload[-4]
                         g = payload[-3]
