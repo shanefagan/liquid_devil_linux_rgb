@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 # I2C constants
 I2C_RDWR: int = 0x0707
 DEFAULT_ADDR: int = 0x22
-DELAY: float = 0.05  # 50ms pause between writes
+DELAY: float = 0.03  # 30ms pause for real-time ~33 FPS updates
 
 
 class I2CMsg(ctypes.Structure):
@@ -202,15 +202,13 @@ class LiquidDevilRGB:
         brightness: int = 255,
         speed: int = 255,
     ) -> bool:
-        """Apply a hardware lighting mode (1-9) with target color, brightness, and speed."""
-        self.turn_off()
-        time.sleep(0.2)
+        """Apply a hardware lighting mode (1-9) seamlessly without turning off."""
         if mode in (1, 2, 4, 5, 7, 8):  # Modes requiring color setup
             self.set_all_color(r, g, b)
         return self.set_settings(mode, brightness, speed)
 
     def set_static(self, r: int, g: int, b: int, brightness: int = 255) -> bool:
-        """Set static color across all LEDs at specified brightness (Mode 1)."""
+        """Set static color instantly across all LEDs (Mode 1)."""
         return self.set_mode(1, r, g, b, brightness=brightness, speed=255)
 
     def set_breathing(
@@ -278,7 +276,7 @@ def add_color_args(subparser: argparse.ArgumentParser) -> None:
     subparser.add_argument("r", type=int, nargs="?", help="Red (0-255)")
     subparser.add_argument("g", type=int, nargs="?", help="Green (0-255)")
     subparser.add_argument("b", type=int, nargs="?", help="Blue (0-255)")
-    subparser.add_argument("--hex", type=hex_color, help="Hex color (e.g. #FF00FF)")
+    subparser.add_argument("--hex", type=hex_color, help="Hex color (e.g. #00FF00)")
     subparser.add_argument(
         "--brightness",
         type=int,
