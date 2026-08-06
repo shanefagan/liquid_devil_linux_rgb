@@ -79,7 +79,9 @@ def find_oem_i2c_bus() -> str:
 class LiquidDevilRGB:
     """Hardware controller interface for PowerColor RX 7900 XTX Liquid Devil RGB lighting."""
 
-    def __init__(self, bus_path: str | None = None, addr: int = DEFAULT_ADDR) -> None:
+    def __init__(
+        self, bus_path: str | None = None, addr: int = DEFAULT_ADDR
+    ) -> None:
         """Initialize the RGB controller instance.
 
         Args:
@@ -285,7 +287,6 @@ def hex_color(val: str) -> tuple[int, int, int]:
 
 # --- OpenRGB SDK Client Sync Module ---
 
-
 def run_openrgb_sync_client(
     host: str = "127.0.0.1",
     port: int = 6742,
@@ -300,7 +301,7 @@ def run_openrgb_sync_client(
     print("================================================================")
     print(f"[*] Connecting to OpenRGB Server at {host}:{port}...")
     print(f"[*] Target Device Index: {device_idx}")
-    print(f"[*] Sync Rate: ~{fps} FPS ({interval * 1000:.1f}ms interval)")
+    print(f"[*] Sync Rate: ~{fps} FPS ({interval*1000:.1f}ms interval)")
     print("[*] Press Ctrl+C to stop sync daemon.\n")
 
     with LiquidDevilRGB(bus_path=bus_path) as dev:
@@ -315,29 +316,15 @@ def run_openrgb_sync_client(
                 # Set client name
                 name_bytes = b"Liquid Devil GPU Sync" + b"\x00"
                 name_payload = struct.pack("<H", len(name_bytes)) + name_bytes
-                hdr = struct.pack(
-                    "<4sIII",
-                    b"ORGB",
-                    0,
-                    NET_PACKET_TYPE_SET_CLIENT_NAME,
-                    len(name_payload),
-                )
+                hdr = struct.pack("<4sIII", b"ORGB", 0, NET_PACKET_TYPE_SET_CLIENT_NAME, len(name_payload))
                 s.sendall(hdr + name_payload)
 
                 print(f"[+] Connected to OpenRGB Server at {host}:{port}!")
 
                 while True:
                     # Request controller data for target device_idx
-                    req_hdr = struct.pack(
-                        "<4sIII",
-                        b"ORGB",
-                        device_idx,
-                        NET_PACKET_TYPE_REQUEST_CONTROLLER_DATA,
-                        4,
-                    )
-                    s.sendall(
-                        req_hdr + struct.pack("<I", 3)
-                    )  # Client protocol version 3
+                    req_hdr = struct.pack("<4sIII", b"ORGB", device_idx, NET_PACKET_TYPE_REQUEST_CONTROLLER_DATA, 4)
+                    s.sendall(req_hdr + struct.pack("<I", 3))  # Client protocol version 3
 
                     resp_hdr = s.recv(16)
                     if not resp_hdr or len(resp_hdr) < 16:
@@ -354,22 +341,19 @@ def run_openrgb_sync_client(
                             break
                         payload += chunk
 
-                    # Parse colors from payload end
-                    if len(payload) > 20:
-                        # Extract last RGB triplet or average color from payload
-                        # The colors array is at the end of the payload
-                        r = payload[-3]
-                        g = payload[-2]
-                        b = payload[-1]
+                    # Parse color entries from end of payload
+                    # In OpenRGB SDK protocol, colors are 4-byte BGRA/RGBA structs: [R, G, B, 0]
+                    # So the last color entry is at offsets -4, -3, -2 (R, G, B)
+                    if len(payload) >= 4:
+                        r = payload[-4]
+                        g = payload[-3]
+                        b = payload[-2]
                         dev.set_all_color(r, g, b)
 
                     time.sleep(interval)
 
             except (TimeoutError, ConnectionResetError, BrokenPipeError, OSError) as e:
-                print(
-                    f"[-] Disconnected from OpenRGB server ({e}). Retrying in 3 seconds...",
-                    file=sys.stderr,
-                )
+                print(f"[-] Disconnected from OpenRGB server ({e}). Retrying in 3 seconds...", file=sys.stderr)
                 time.sleep(3.0)
             except KeyboardInterrupt:
                 print("\n[*] Stopping OpenRGB Sync daemon...")
@@ -377,7 +361,6 @@ def run_openrgb_sync_client(
 
 
 # --- OpenRGB SDK Server Helpers ---
-
 
 def pack_string(s: str) -> bytes:
     """Pack string with 16-bit length prefix as expected by OpenRGB SDK."""
@@ -468,9 +451,7 @@ def handle_sdk_client(
                     payload += chunk
 
             if pkt_type == NET_PACKET_TYPE_REQUEST_CONTROLLER_COUNT:
-                resp_header = struct.pack(
-                    "<4sIII", b"ORGB", 0, NET_PACKET_TYPE_REQUEST_CONTROLLER_COUNT, 4
-                )
+                resp_header = struct.pack("<4sIII", b"ORGB", 0, NET_PACKET_TYPE_REQUEST_CONTROLLER_COUNT, 4)
                 resp_payload = struct.pack("<I", 1)
                 client_sock.sendall(resp_header + resp_payload)
 
@@ -478,32 +459,19 @@ def handle_sdk_client(
                 if len(payload) >= 4:
                     protocol_version = struct.unpack("<I", payload[:4])[0]
                 data = build_controller_data_packet(protocol_version)
-                resp_header = struct.pack(
-                    "<4sIII",
-                    b"ORGB",
-                    0,
-                    NET_PACKET_TYPE_REQUEST_CONTROLLER_DATA,
-                    len(data),
-                )
+                resp_header = struct.pack("<4sIII", b"ORGB", 0, NET_PACKET_TYPE_REQUEST_CONTROLLER_DATA, len(data))
                 client_sock.sendall(resp_header + data)
 
             elif pkt_type == NET_PACKET_TYPE_SET_CLIENT_NAME:
                 if len(payload) >= 2:
                     try:
                         name_len = struct.unpack("<H", payload[:2])[0]
-                        client_name = (
-                            payload[2 : 2 + name_len]
-                            .decode("utf-8", errors="ignore")
-                            .rstrip("\x00")
-                        )
+                        client_name = payload[2 : 2 + name_len].decode("utf-8", errors="ignore").rstrip("\x00")
                         print(f"[*] OpenRGB SDK Client Name set to: '{client_name}'")
                     except (struct.error, UnicodeDecodeError):
                         pass
 
-            elif pkt_type in (
-                NET_PACKET_TYPE_UPDATE_LEDS,
-                NET_PACKET_TYPE_UPDATE_ZONE_LEDS,
-            ):
+            elif pkt_type in (NET_PACKET_TYPE_UPDATE_LEDS, NET_PACKET_TYPE_UPDATE_ZONE_LEDS):
                 if len(payload) >= 6:
                     num_colors = struct.unpack("<H", payload[4:6])[0]
                     colors_data = payload[6:]
@@ -521,11 +489,7 @@ def handle_sdk_client(
                             valid_colors += 1
 
                     if valid_colors > 0:
-                        dev.set_all_color(
-                            r_total // valid_colors,
-                            g_total // valid_colors,
-                            b_total // valid_colors,
-                        )
+                        dev.set_all_color(r_total // valid_colors, g_total // valid_colors, b_total // valid_colors)
 
     except (TimeoutError, ConnectionResetError, BrokenPipeError, OSError):
         pass
@@ -534,9 +498,7 @@ def handle_sdk_client(
         print(f"[*] OpenRGB SDK Client disconnected: {client_addr[0]}:{client_addr[1]}")
 
 
-def run_sdk_server(
-    host: str = "0.0.0.0", port: int = 6742, bus_path: str | None = None
-) -> None:
+def run_sdk_server(host: str = "0.0.0.0", port: int = 6742, bus_path: str | None = None) -> None:
     """Run OpenRGB SDK Server daemon listening on specified host/port."""
     server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -573,7 +535,9 @@ def add_color_args(subparser: argparse.ArgumentParser) -> None:
     subparser.add_argument("r", type=int, nargs="?", help="Red (0-255)")
     subparser.add_argument("g", type=int, nargs="?", help="Green (0-255)")
     subparser.add_argument("b", type=int, nargs="?", help="Blue (0-255)")
-    subparser.add_argument("--hex", type=hex_color, help="Hex color (e.g. #00FF00)")
+    subparser.add_argument(
+        "--hex", type=hex_color, help="Hex color (e.g. #00FF00)"
+    )
     subparser.add_argument(
         "--brightness",
         type=int,
@@ -586,11 +550,7 @@ def parse_rgb(args: argparse.Namespace) -> tuple[int, int, int]:
     """Extract (R, G, B) from CLI arguments."""
     if getattr(args, "hex", None):
         return args.hex
-    r, g, b = (
-        getattr(args, "r", None),
-        getattr(args, "g", None),
-        getattr(args, "b", None),
-    )
+    r, g, b = getattr(args, "r", None), getattr(args, "g", None), getattr(args, "b", None)
     if r is not None and g is not None and b is not None:
         return r, g, b
     print("Error: Specify R G B values (0-255) or --hex color", file=sys.stderr)
@@ -617,24 +577,10 @@ def main() -> None:
         aliases=["sync"],
         help="Sync GPU colors in real-time by connecting as a client to an OpenRGB Server",
     )
-    p_sync.add_argument(
-        "--host",
-        type=str,
-        default="127.0.0.1",
-        help="OpenRGB server IP (default: 127.0.0.1)",
-    )
-    p_sync.add_argument(
-        "--port", type=int, default=6742, help="OpenRGB server port (default: 6742)"
-    )
-    p_sync.add_argument(
-        "--device-idx",
-        type=int,
-        default=0,
-        help="Target OpenRGB device index to mirror (default: 0)",
-    )
-    p_sync.add_argument(
-        "--fps", type=int, default=30, help="Sync update frame rate (default: 30)"
-    )
+    p_sync.add_argument("--host", type=str, default="127.0.0.1", help="OpenRGB server IP (default: 127.0.0.1)")
+    p_sync.add_argument("--port", type=int, default=6742, help="OpenRGB server port (default: 6742)")
+    p_sync.add_argument("--device-idx", type=int, default=0, help="Target OpenRGB device index to mirror (default: 0)")
+    p_sync.add_argument("--fps", type=int, default=30, help="Sync update frame rate (default: 30)")
 
     # Command: off
     subparsers.add_parser("off", help="Turn all LEDs off")
@@ -643,15 +589,9 @@ def main() -> None:
     subparsers.add_parser("status", help="Read current RGB controller status")
 
     # Command: sdk-server
-    p_sdk = subparsers.add_parser(
-        "sdk-server", help="Run OpenRGB SDK Server daemon (port 6742)"
-    )
-    p_sdk.add_argument(
-        "--host", type=str, default="0.0.0.0", help="Host IP to bind (default: 0.0.0.0)"
-    )
-    p_sdk.add_argument(
-        "--port", type=int, default=6742, help="Port to listen (default: 6742)"
-    )
+    p_sdk = subparsers.add_parser("sdk-server", help="Run OpenRGB SDK Server daemon (port 6742)")
+    p_sdk.add_argument("--host", type=str, default="0.0.0.0", help="Host IP to bind (default: 0.0.0.0)")
+    p_sdk.add_argument("--port", type=int, default=6742, help="Port to listen (default: 6742)")
 
     # Command: static
     p_static = subparsers.add_parser("static", help="Set solid static color (Mode 1)")
@@ -660,54 +600,32 @@ def main() -> None:
     # Command: breathing
     p_breath = subparsers.add_parser("breathing", help="Set breathing effect (Mode 2)")
     add_color_args(p_breath)
-    p_breath.add_argument(
-        "--speed", type=int, default=50, help="Animation speed (0-255)"
-    )
+    p_breath.add_argument("--speed", type=int, default=50, help="Animation speed (0-255)")
 
     # Command: neon
-    p_neon = subparsers.add_parser(
-        "neon", help="Set spectrum cycle / neon effect (Mode 3)"
-    )
-    p_neon.add_argument(
-        "--brightness", type=int, default=255, help="Brightness (0-255)"
-    )
+    p_neon = subparsers.add_parser("neon", help="Set spectrum cycle / neon effect (Mode 3)")
+    p_neon.add_argument("--brightness", type=int, default=255, help="Brightness (0-255)")
     p_neon.add_argument("--speed", type=int, default=50, help="Speed (0-255)")
 
     # Command: blink
-    p_blink = subparsers.add_parser(
-        "blink", help="Set single flash pulse effect (Mode 4)"
-    )
+    p_blink = subparsers.add_parser("blink", help="Set single flash pulse effect (Mode 4)")
     add_color_args(p_blink)
-    p_blink.add_argument(
-        "--speed", type=int, default=50, help="Animation speed (0-255)"
-    )
+    p_blink.add_argument("--speed", type=int, default=50, help="Animation speed (0-255)")
 
     # Command: double-blink
-    p_dblink = subparsers.add_parser(
-        "double-blink", help="Set double flash pulse effect (Mode 5)"
-    )
+    p_dblink = subparsers.add_parser("double-blink", help="Set double flash pulse effect (Mode 5)")
     add_color_args(p_dblink)
-    p_dblink.add_argument(
-        "--speed", type=int, default=50, help="Animation speed (0-255)"
-    )
+    p_dblink.add_argument("--speed", type=int, default=50, help="Animation speed (0-255)")
 
     # Command: meteor
-    p_meteor = subparsers.add_parser(
-        "meteor", help="Set meteor beam effect across face (Mode 7)"
-    )
+    p_meteor = subparsers.add_parser("meteor", help="Set meteor beam effect across face (Mode 7)")
     add_color_args(p_meteor)
-    p_meteor.add_argument(
-        "--speed", type=int, default=20, help="Animation speed (0-255)"
-    )
+    p_meteor.add_argument("--speed", type=int, default=20, help="Animation speed (0-255)")
 
     # Command: ripple
-    p_ripple = subparsers.add_parser(
-        "ripple", help="Set ripple wave expansion effect (Mode 8)"
-    )
+    p_ripple = subparsers.add_parser("ripple", help="Set ripple wave expansion effect (Mode 8)")
     add_color_args(p_ripple)
-    p_ripple.add_argument(
-        "--speed", type=int, default=30, help="Animation speed (0-255)"
-    )
+    p_ripple.add_argument("--speed", type=int, default=30, help="Animation speed (0-255)")
 
     # Command: led
     p_led = subparsers.add_parser("led", help="Set individual LED color (0 to 16)")
@@ -764,16 +682,12 @@ def main() -> None:
 
         elif args.command == "static":
             r, g, b = parse_rgb(args)
-            print(
-                f"[*] Setting static color: R={r} G={g} B={b} (Brightness={args.brightness})"
-            )
+            print(f"[*] Setting static color: R={r} G={g} B={b} (Brightness={args.brightness})")
             dev.set_static(r, g, b, brightness=args.brightness)
 
         elif args.command == "breathing":
             r, g, b = parse_rgb(args)
-            print(
-                f"[*] Setting breathing color: R={r} G={g} B={b} (Speed={args.speed})"
-            )
+            print(f"[*] Setting breathing color: R={r} G={g} B={b} (Speed={args.speed})")
             dev.set_breathing(r, g, b, brightness=args.brightness, speed=args.speed)
 
         elif args.command == "neon":
@@ -787,9 +701,7 @@ def main() -> None:
 
         elif args.command == "double-blink":
             r, g, b = parse_rgb(args)
-            print(
-                f"[*] Setting double-blink effect: R={r} G={g} B={b} (Speed={args.speed})"
-            )
+            print(f"[*] Setting double-blink effect: R={r} G={g} B={b} (Speed={args.speed})")
             dev.set_double_blink(r, g, b, brightness=args.brightness, speed=args.speed)
 
         elif args.command == "meteor":
