@@ -46,7 +46,7 @@ sudo usermod -aG i2c $USER
 Clone the repository and install:
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/liquid-devil-rgb.git
+git clone https://github.com/shanefagan/liquid-devil-rgb.git
 cd liquid-devil-rgb
 pip install .
 ```
