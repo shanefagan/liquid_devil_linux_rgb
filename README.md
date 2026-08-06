@@ -1,6 +1,6 @@
 # Liquid Devil RGB Control for Linux
 
-A standalone CLI tool and Python library for controlling the RGB lighting on the **PowerColor Radeon RX 7900 XTX Liquid Devil** graphics card under Linux via I2C.
+A standalone CLI tool, Python library, and **OpenRGB SDK Server** for controlling the RGB lighting on the **PowerColor Radeon RX 7900 XTX Liquid Devil** graphics card under Linux via I2C.
 
 Reverse-engineered hardware protocol implementation for the V2 I2C RGB microcontroller at address `0x22`.
 
@@ -8,6 +8,7 @@ Reverse-engineered hardware protocol implementation for the V2 I2C RGB microcont
 
 ## Features
 
+- 🌐 **OpenRGB SDK Server Mode**: Emulates an OpenRGB SDK Server (port `6742`) so OpenRGB-compatible apps (**Artemis**, **SignalRGB**, **Audio Visualizers**, **OpenRGB GUI**) can control the GPU in real-time!
 - 🟢 **Auto-Detection**: Automatically locates the `AMDGPU DM i2c OEM bus` across systems and reboots.
 - 🎨 **Full Color Control**: Set any static RGB color or hex color (`#FF00FF`, `#00FFFF`, etc.).
 - 💡 **Full Brightness**: Supports the full `0–255` brightness range.
@@ -21,9 +22,9 @@ Reverse-engineered hardware protocol implementation for the V2 I2C RGB microcont
   - `ripple`: Dynamic wave expansion across the waterblock.
   - `off`: Turn off all LEDs.
 - 🎯 **Individual LED Addressing**: Address any of the **17 individual LEDs** (0 to 16) on the EKWB waterblock.
-- ⚙️ **Master Offset Support**: Uses Master Offset 48 (`0x30`) for simultaneous, flicker-free updates.
+- ⚙️ **Master Offset Support**: Uses Master Offset 48 (`0x30`) for simultaneous, flicker-free updates up to **33 FPS**.
 - 🔒 **Safe Execution**: Includes guardrails to prevent writing to hazardous registers (such as `0xCC`).
-- ⚡ **Zero Dependencies**: Standard Python 3 library (`ctypes`, `fcntl`, `sys`) — no third-party packages required!
+- ⚡ **Zero Dependencies**: Standard Python 3 library (`ctypes`, `fcntl`, `sys`, `socket`) — no third-party packages required!
 
 ---
 
@@ -67,13 +68,78 @@ makepkg -si
 
 ---
 
-## Usage
+## OpenRGB SDK Server Mode (Real-Time Apps Integration)
 
-### Command Line Interface
+`liquid-devil-rgb` includes an **OpenRGB SDK Server daemon**. Running this daemon opens port `6742` and exposes your Liquid Devil GPU to any software that supports OpenRGB SDK (e.g. OpenRGB GUI, Artemis, SignalRGB, Audio Visualizers).
+
+To start the SDK Server:
+
+```bash
+liquid-devil-rgb sdk-server
+```
+
+Once running, open **OpenRGB GUI** (or Artemis / SignalRGB), connect to `127.0.0.1:6742` under the **SDK Client** tab, and your **PowerColor RX 7900 XTX Liquid Devil** will appear as an active GPU device!
+
+---
+
+## Systemd Service (Automated SDK Server or Startup Color)
+
+### Option A: Run OpenRGB SDK Server at Boot (Recommended)
+
+`/etc/systemd/system/liquid-devil-sdk-server.service`:
+
+```ini
+[Unit]
+Description=PowerColor Liquid Devil 7900 XTX OpenRGB SDK Server Daemon
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/liquid-devil-rgb sdk-server
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Enable and start:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now liquid-devil-sdk-server.service
+```
+
+---
+
+### Option B: Set a Fixed Color at Boot
+
+`/etc/systemd/system/liquid-devil-rgb.service`:
+
+```ini
+[Unit]
+Description=Set PowerColor Liquid Devil 7900 XTX RGB Color
+After=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/liquid-devil-rgb static 0 0 255
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+```
+
+---
+
+## Command Line Interface Usage
 
 ```bash
 # Read RGB status and mode
 liquid-devil-rgb status
+
+# Run OpenRGB SDK Server (port 6742)
+liquid-devil-rgb sdk-server
 
 # Turn off all RGB LEDs
 liquid-devil-rgb off
@@ -104,35 +170,6 @@ liquid-devil-rgb led 0 255 0 0           # Set LED 0 (front right) to Red
 
 ---
 
-## Systemd Service (Optional Startup Color)
-
-To set your GPU RGB color automatically at boot, create a systemd service:
-
-`/etc/systemd/system/liquid-devil-rgb.service`:
-
-```ini
-[Unit]
-Description=Set PowerColor Liquid Devil 7900 XTX RGB Color
-After=multi-user.target
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/bin/liquid-devil-rgb static 0 0 255
-RemainAfterExit=yes
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Enable the service:
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now liquid-devil-rgb.service
-```
-
----
-
 ## Hardware Protocol Summary
 
 | Parameter | Register / Value | Notes |
@@ -145,12 +182,6 @@ sudo systemctl enable --now liquid-devil-rgb.service
 | **Individual LED Offsets** | `26` to `42` (`0x1A`–`0x2A`) | 17 LEDs (0 to 16) |
 
 *See `PROTOCOL.md` for full technical specification.*
-
----
-
-## OpenRGB Coexistence
-
-OpenRGB does not currently support the 7900 XTX Liquid Devil V2 controller. Because OpenRGB skips the unrecognized controller at address `0x22` after its initial startup scan, `liquid-devil-rgb` and OpenRGB can run side-by-side without issues (e.g., OpenRGB managing your RAM/motherboard while `liquid-devil-rgb` controls your GPU).
 
 ---
 
