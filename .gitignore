@@ -21,9 +21,11 @@ wheels/
 .idea/
 .vscode/
 
-# Arch & Debian build work directories
+# Package outputs & build work directories
 pkg/
 src/*.egg-info/
 packaging/arch/pkg/
 packaging/arch/src/
-packaging/arch/*.pkg.tar.zst
+*.pkg.tar.zst
+*.deb
+*.rpm
