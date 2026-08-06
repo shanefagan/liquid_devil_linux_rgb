@@ -8,17 +8,31 @@ arch=('any')
 url="https://github.com/shanefagan/liquid_devil_linux_rgb"
 license=('MIT')
 depends=('python' 'i2c-tools')
-makedepends=('python-setuptools')
+makedepends=('uv')
 source=()
 
 build() {
   cd "$startdir/../.." 2>/dev/null || cd "$startdir"
-  python setup.py build
+  uv build
 }
 
 package() {
   cd "$startdir/../.." 2>/dev/null || cd "$startdir"
-  python setup.py install --root="$pkgdir" --optimize=1 --skip-build
+  python_ver=$(python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+  site_dir="$pkgdir/usr/lib/python${python_ver}/site-packages"
+  bin_dir="$pkgdir/usr/bin"
+  mkdir -p "$site_dir" "$bin_dir"
+
+  cp -r src/liquid_devil_rgb "$site_dir/"
+  
+  cat << 'EOF' > "$bin_dir/liquid-devil-rgb"
+#!/usr/bin/env python3
+from liquid_devil_rgb.cli import main
+if __name__ == '__main__':
+    main()
+EOF
+  chmod +x "$bin_dir/liquid-devil-rgb"
+
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
   install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
   install -Dm644 PROTOCOL.md "$pkgdir/usr/share/doc/$pkgname/PROTOCOL.md"
