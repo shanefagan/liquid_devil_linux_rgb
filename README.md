@@ -24,15 +24,50 @@ Reverse-engineered hardware protocol implementation for the V2 I2C RGB microcont
   - `off`: Turn off all LEDs.
 - Individual LED Addressing: Address any of the 17 individual LEDs (0 to 16) on the EKWB waterblock.
 - Master Offset Support: Uses Master Offset 48 (`0x30`) for simultaneous updates up to 33 FPS.
-- Zero Dependencies: Standard Python 3 library (`ctypes`, `fcntl`, `sys`, `socket`).
+- Zero External Hardware Dependencies: Includes transparent stdlib fallback when `smbus2` is not installed.
 
 ---
 
 ## Installation
 
+### 1. Pre-built Packages (Recommended)
+
+Download the latest pre-built package for your distribution from the [Releases](https://github.com/shanefagan/liquid_devil_linux_rgb/releases) page:
+
+**Arch Linux / CachyOS / Manjaro**:
+```bash
+sudo pacman -U liquid-devil-rgb-1.0.0-1-any.pkg.tar.zst
+```
+
+**Debian / Ubuntu / Mint / Pop!_OS**:
+```bash
+sudo dpkg -i liquid-devil-rgb_1.0.0-1_all.deb
+```
+
+**Fedora / RHEL**:
+```bash
+sudo dnf install liquid-devil-rgb-1.0.0-1.noarch.rpm
+```
+
+### 2. Universal Python Installation (`pipx` / `uv`)
+
+```bash
+pipx install liquid-devil-rgb
+# OR
+uv tool install liquid-devil-rgb
+```
+
+### 3. Build from Source
+
+```bash
+git clone https://github.com/shanefagan/liquid_devil_linux_rgb.git
+cd liquid_devil_linux_rgb
+uv tool install .
+```
+
 ### Prerequisites
 
-Make sure the Linux `i2c-dev` module is loaded:
+Ensure the Linux `i2c-dev` kernel module is loaded:
 
 ```bash
 sudo modprobe i2c-dev
@@ -42,26 +77,6 @@ To load `i2c-dev` automatically on boot:
 
 ```bash
 echo "i2c-dev" | sudo tee /etc/modules-load.d/i2c-dev.conf
-```
-
-### Install Package
-
-Build and install using `uv`:
-
-```bash
-git clone https://github.com/shanefagan/liquid_devil_linux_rgb.git
-cd liquid_devil_linux_rgb
-uv tool install .
-```
-
-Or install the package for your distribution:
-
-```bash
-# Arch Linux / CachyOS / Manjaro
-sudo pacman -U liquid-devil-rgb-1.0.0-1-any.pkg.tar.zst
-
-# Debian / Ubuntu / Mint / Pop!_OS
-sudo dpkg -i liquid-devil-rgb_1.0.0-1_all.deb
 ```
 
 ---
