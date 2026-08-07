@@ -3,6 +3,7 @@
 
 Reverse-engineered hardware protocol implementation for the V2 I2C RGB controller (0x22).
 Supports smbus2 with a seamless stdlib ctypes fallback when smbus2 is not installed.
+Includes real-time per-LED OpenRGB Effects Plugin synchronization.
 """
 
 from __future__ import annotations
@@ -58,6 +59,8 @@ NET_PACKET_TYPE_REQUEST_CONTROLLER_DATA: int = 1
 NET_PACKET_TYPE_SET_CLIENT_NAME: int = 50
 NET_PACKET_TYPE_UPDATE_LEDS: int = 100
 NET_PACKET_TYPE_UPDATE_ZONE_LEDS: int = 101
+NET_PACKET_TYPE_UPDATE_SINGLE_LED: int = 102
+NET_PACKET_TYPE_SET_CUSTOM_MODE: int = 110
 
 
 def find_oem_i2c_bus() -> str:
@@ -187,7 +190,10 @@ class LiquidDevilRGB:
             wbuf = ctypes.create_string_buffer(bytes([offset]))
             rbuf = ctypes.create_string_buffer(length)
             msg_w = I2CMsg(
-                addr=self.addr, flags=0, len=1, buf=ctypes.cast(wbuf, ctypes.c_char_p)
+                addr=self.addr,
+                flags=0,
+                len=1,
+                buf=ctypes.cast(wbuf, ctypes.c_char_p),
             )
             msg_r = I2CMsg(
                 addr=self.addr,
@@ -240,7 +246,7 @@ class LiquidDevilRGB:
         speed: int = 255,
     ) -> bool:
         """Apply a hardware lighting mode (1-9) seamlessly without turning off."""
-        if mode in (1, 2, 4, 5, 7, 8):  # Modes requiring color setup
+        if mode in (1, 2, 4, 5, 7, 8):
             self.set_all_color(r, g, b)
         return self.set_settings(mode, brightness, speed)
 
@@ -368,7 +374,7 @@ def run_openrgb_sync_client(
                     if not resp_hdr or len(resp_hdr) < 16:
                         break
 
-                    magic, _dev_id, _pkt_t, pkt_len = struct.unpack("<4sIII", resp_hdr)
+                    magic, _dev_id, pkt_t, pkt_len = struct.unpack("<4sIII", resp_hdr)
                     if magic != b"ORGB" or pkt_len == 0:
                         break
 
@@ -379,15 +385,56 @@ def run_openrgb_sync_client(
                             break
                         payload += chunk
 
-                    if len(payload) >= 4:
-                        r = payload[-4]
-                        g = payload[-3]
-                        b = payload[-2]
-                        dev.set_all_color(r, g, b)
+                    # Parse incoming packet (either REQUEST_CONTROLLER_DATA or UPDATE_LEDS / UPDATE_ZONE_LEDS)
+                    colors_data = b""
+                    stride = 3
+
+                    if (
+                        pkt_t == NET_PACKET_TYPE_REQUEST_CONTROLLER_DATA
+                        and len(payload) >= 4
+                    ):
+                        colors_data = payload[-68:]  # Last 68 bytes
+                        stride = 4
+
+                    elif pkt_t == NET_PACKET_TYPE_UPDATE_LEDS and len(payload) >= 6:
+                        colors_data = payload[6:]
+                        stride = 3
+
+                    elif (
+                        pkt_t == NET_PACKET_TYPE_UPDATE_ZONE_LEDS and len(payload) >= 10
+                    ):
+                        colors_data = payload[10:]
+                        stride = 3
+
+                    if colors_data:
+                        r_total, g_total, b_total = 0, 0, 0
+                        valid_colors = 0
+                        num_colors = len(colors_data) // stride
+
+                        for i in range(min(num_colors, 17)):
+                            off = i * stride
+                            if off + 3 <= len(colors_data):
+                                r, g, b = colors_data[off : off + 3]
+                                r_total += r
+                                g_total += g
+                                b_total += b
+                                valid_colors += 1
+
+                        if valid_colors > 0:
+                            dev.set_all_color(
+                                r_total // valid_colors,
+                                g_total // valid_colors,
+                                b_total // valid_colors,
+                            )
 
                     time.sleep(interval)
 
-            except (TimeoutError, ConnectionResetError, BrokenPipeError, OSError) as e:
+            except (
+                TimeoutError,
+                ConnectionResetError,
+                BrokenPipeError,
+                OSError,
+            ) as e:
                 print(
                     f"Disconnected from OpenRGB server ({e}). Retrying in 3 seconds...",
                     file=sys.stderr,
@@ -490,7 +537,11 @@ def handle_sdk_client(
 
             if pkt_type == NET_PACKET_TYPE_REQUEST_CONTROLLER_COUNT:
                 resp_header = struct.pack(
-                    "<4sIII", b"ORGB", 0, NET_PACKET_TYPE_REQUEST_CONTROLLER_COUNT, 4
+                    "<4sIII",
+                    b"ORGB",
+                    0,
+                    NET_PACKET_TYPE_REQUEST_CONTROLLER_COUNT,
+                    4,
                 )
                 resp_payload = struct.pack("<I", 1)
                 client_sock.sendall(resp_header + resp_payload)
@@ -521,32 +572,68 @@ def handle_sdk_client(
                     except (struct.error, UnicodeDecodeError):
                         pass
 
-            elif pkt_type in (
-                NET_PACKET_TYPE_UPDATE_LEDS,
-                NET_PACKET_TYPE_UPDATE_ZONE_LEDS,
-            ):
+            elif pkt_type == NET_PACKET_TYPE_UPDATE_LEDS:
+                # Payload: [buffer_size (4B)][num_colors (2B)][color_structs...]
                 if len(payload) >= 6:
                     num_colors = struct.unpack("<H", payload[4:6])[0]
                     colors_data = payload[6:]
-                    r_total, g_total, b_total = 0, 0, 0
                     stride = 4 if protocol_version >= 4 else 3
-                    valid_colors = 0
 
-                    for i in range(min(num_colors, 17)):
-                        offset = i * stride
-                        if offset + 3 <= len(colors_data):
-                            r, g, b = colors_data[offset : offset + 3]
-                            r_total += r
-                            g_total += g
-                            b_total += b
-                            valid_colors += 1
+                    # Stream individual LED colors or calculate master color
+                    if num_colors >= 17:
+                        for i in range(17):
+                            off = i * stride
+                            if off + 3 <= len(colors_data):
+                                r, g, b = colors_data[off : off + 3]
+                                dev.write_raw(26 + i, [r, g, b])
+                        dev.set_settings(1, 255, 255)
+                    else:
+                        r_t, g_t, b_t, valid = 0, 0, 0, 0
+                        for i in range(num_colors):
+                            off = i * stride
+                            if off + 3 <= len(colors_data):
+                                r, g, b = colors_data[off : off + 3]
+                                r_t += r
+                                g_t += g
+                                b_t += b
+                                valid += 1
+                        if valid > 0:
+                            dev.set_all_color(r_t // valid, g_t // valid, b_t // valid)
 
-                    if valid_colors > 0:
-                        dev.set_all_color(
-                            r_total // valid_colors,
-                            g_total // valid_colors,
-                            b_total // valid_colors,
-                        )
+            elif pkt_type == NET_PACKET_TYPE_UPDATE_ZONE_LEDS:
+                # Payload: [buffer_size (4B)][zone_index (4B)][num_colors (2B)][color_structs...]
+                if len(payload) >= 10:
+                    num_colors = struct.unpack("<H", payload[8:10])[0]
+                    colors_data = payload[10:]
+                    stride = 4 if protocol_version >= 4 else 3
+
+                    if num_colors >= 17:
+                        for i in range(17):
+                            off = i * stride
+                            if off + 3 <= len(colors_data):
+                                r, g, b = colors_data[off : off + 3]
+                                dev.write_raw(26 + i, [r, g, b])
+                        dev.set_settings(1, 255, 255)
+                    else:
+                        r_t, g_t, b_t, valid = 0, 0, 0, 0
+                        for i in range(num_colors):
+                            off = i * stride
+                            if off + 3 <= len(colors_data):
+                                r, g, b = colors_data[off : off + 3]
+                                r_t += r
+                                g_t += g
+                                b_t += b
+                                valid += 1
+                        if valid > 0:
+                            dev.set_all_color(r_t // valid, g_t // valid, b_t // valid)
+
+            elif pkt_type == NET_PACKET_TYPE_UPDATE_SINGLE_LED:
+                # Payload: [buffer_size (4B)][led_index (4B)][r (1B)][g (1B)][b (1B)]
+                if len(payload) >= 11:
+                    led_idx = struct.unpack("<I", payload[4:8])[0]
+                    r, g, b = payload[8:11]
+                    if 0 <= led_idx <= 16:
+                        dev.set_led_color(led_idx, r, g, b)
 
     except (TimeoutError, ConnectionResetError, BrokenPipeError, OSError):
         pass
@@ -609,7 +696,10 @@ def cli(ctx: click.Context, bus: str | None) -> None:
     help="OpenRGB server IP (default: 127.0.0.1)",
 )
 @click.option(
-    "--port", type=int, default=6742, help="OpenRGB server port (default: 6742)"
+    "--port",
+    type=int,
+    default=6742,
+    help="OpenRGB server port (default: 6742)",
 )
 @click.option(
     "--device-idx",
@@ -626,15 +716,27 @@ def openrgb_sync_cmd(
 ) -> None:
     """Sync GPU colors in real-time by connecting as a client to an OpenRGB Server."""
     run_openrgb_sync_client(
-        host=host, port=port, device_idx=device_idx, fps=fps, bus_path=ctx.obj["bus"]
+        host=host,
+        port=port,
+        device_idx=device_idx,
+        fps=fps,
+        bus_path=ctx.obj["bus"],
     )
 
 
 @cli.command("sdk-server")
 @click.option(
-    "--host", type=str, default="0.0.0.0", help="Host IP to bind (default: 0.0.0.0)"
+    "--host",
+    type=str,
+    default="0.0.0.0",
+    help="Host IP to bind (default: 0.0.0.0)",
 )
-@click.option("--port", type=int, default=6742, help="Port to listen (default: 6742)")
+@click.option(
+    "--port",
+    type=int,
+    default=6742,
+    help="Port to listen (default: 6742)",
+)
 @click.pass_context
 def sdk_server_cmd(ctx: click.Context, host: str, port: int) -> None:
     """Run OpenRGB SDK Server daemon (port 6742)."""
@@ -681,7 +783,11 @@ def status_cmd(ctx: click.Context) -> None:
 @click.argument("g", type=int, required=False)
 @click.argument("b", type=int, required=False)
 @click.option(
-    "--hex", "hex_val", type=str, default=None, help="Hex color (e.g. #00FF00)"
+    "--hex",
+    "hex_val",
+    type=str,
+    default=None,
+    help="Hex color (e.g. #00FF00)",
 )
 @click.option("--brightness", type=int, default=255, help="Brightness (0-255)")
 @click.pass_context
@@ -707,7 +813,11 @@ def static_cmd(
 @click.argument("g", type=int, required=False)
 @click.argument("b", type=int, required=False)
 @click.option(
-    "--hex", "hex_val", type=str, default=None, help="Hex color (e.g. #00FF00)"
+    "--hex",
+    "hex_val",
+    type=str,
+    default=None,
+    help="Hex color (e.g. #00FF00)",
 )
 @click.option("--brightness", type=int, default=255, help="Brightness (0-255)")
 @click.option("--speed", type=int, default=50, help="Animation speed (0-255)")
@@ -744,7 +854,11 @@ def neon_cmd(ctx: click.Context, brightness: int, speed: int) -> None:
 @click.argument("g", type=int, required=False)
 @click.argument("b", type=int, required=False)
 @click.option(
-    "--hex", "hex_val", type=str, default=None, help="Hex color (e.g. #00FF00)"
+    "--hex",
+    "hex_val",
+    type=str,
+    default=None,
+    help="Hex color (e.g. #00FF00)",
 )
 @click.option("--brightness", type=int, default=255, help="Brightness (0-255)")
 @click.option("--speed", type=int, default=50, help="Animation speed (0-255)")
@@ -770,7 +884,11 @@ def blink_cmd(
 @click.argument("g", type=int, required=False)
 @click.argument("b", type=int, required=False)
 @click.option(
-    "--hex", "hex_val", type=str, default=None, help="Hex color (e.g. #00FF00)"
+    "--hex",
+    "hex_val",
+    type=str,
+    default=None,
+    help="Hex color (e.g. #00FF00)",
 )
 @click.option("--brightness", type=int, default=255, help="Brightness (0-255)")
 @click.option("--speed", type=int, default=50, help="Animation speed (0-255)")
@@ -798,7 +916,11 @@ def double_blink_cmd(
 @click.argument("g", type=int, required=False)
 @click.argument("b", type=int, required=False)
 @click.option(
-    "--hex", "hex_val", type=str, default=None, help="Hex color (e.g. #00FF00)"
+    "--hex",
+    "hex_val",
+    type=str,
+    default=None,
+    help="Hex color (e.g. #00FF00)",
 )
 @click.option("--brightness", type=int, default=255, help="Brightness (0-255)")
 @click.option("--speed", type=int, default=20, help="Animation speed (0-255)")
@@ -824,7 +946,11 @@ def meteor_cmd(
 @click.argument("g", type=int, required=False)
 @click.argument("b", type=int, required=False)
 @click.option(
-    "--hex", "hex_val", type=str, default=None, help="Hex color (e.g. #00FF00)"
+    "--hex",
+    "hex_val",
+    type=str,
+    default=None,
+    help="Hex color (e.g. #00FF00)",
 )
 @click.option("--brightness", type=int, default=255, help="Brightness (0-255)")
 @click.option("--speed", type=int, default=30, help="Animation speed (0-255)")
