@@ -643,7 +643,7 @@ def handle_sdk_client(
 
 
 def run_sdk_server(
-    host: str = "0.0.0.0", port: int = 6742, bus_path: str | None = None
+    host: str = "127.0.0.1", port: int = 6742, bus_path: str | None = None
 ) -> None:
     """Run OpenRGB SDK Server daemon listening on specified host/port."""
     server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
