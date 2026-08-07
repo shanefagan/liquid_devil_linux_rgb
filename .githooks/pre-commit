@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -e
+
+echo "[pre-commit] Running ruff linter..."
+uvx ruff check src/
+
+echo "[pre-commit] Running ruff formatter check..."
+uvx ruff format --check src/
+
+echo "[pre-commit] Checks passed successfully."
