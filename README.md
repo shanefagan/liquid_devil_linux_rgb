@@ -30,7 +30,7 @@ Reverse-engineered hardware protocol implementation for the V2 I2C RGB microcont
 
 ## Installation
 
-### 1. Pre-built Packages (Recommended)
+### 1. Pre-built Distribution Packages (Recommended)
 
 Download the latest pre-built package for your distribution from the [Releases](https://github.com/shanefagan/liquid_devil_linux_rgb/releases) page:
 
@@ -49,12 +49,14 @@ sudo dpkg -i liquid-devil-rgb_1.0.0-1_all.deb
 sudo dnf install liquid-devil-rgb-1.0.0-1.noarch.rpm
 ```
 
-### 2. Universal Python Installation (`pipx` / `uv`)
+### 2. Universal Python Wheel (`.whl`)
+
+Download the `.whl` package from the [Releases](https://github.com/shanefagan/liquid_devil_linux_rgb/releases) page:
 
 ```bash
-pipx install liquid-devil-rgb
+pipx install liquid_devil_rgb-*.whl
 # OR
-uv tool install liquid-devil-rgb
+pip install --user liquid_devil_rgb-*.whl
 ```
 
 ### 3. Build from Source
