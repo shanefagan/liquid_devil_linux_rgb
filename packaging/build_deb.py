@@ -2,11 +2,26 @@
 """Pure Python Debian (.deb) Package Builder for liquid-devil-rgb.
 
 Assembles a valid .deb package file directly using Python standard library (tarfile, lzma).
+Dynamically extracts version from git tags.
 """
 
 import io
 import os
+import subprocess
 import tarfile
+
+def get_git_version() -> str:
+    """Dynamically get package version from git tags or fallback."""
+    try:
+        res = subprocess.run(
+            ["git", "describe", "--tags", "--abbrev=0"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return res.stdout.strip().lstrip("v")
+    except Exception:
+        return "1.0.0"
 
 def create_ar_archive(members: list[tuple[str, bytes]]) -> bytes:
     """Create a standard Unix ar archive containing (filename, data) tuples."""
@@ -23,12 +38,14 @@ def main():
     repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     out_dir = os.path.join(repo_root, "dist")
     os.makedirs(out_dir, exist_ok=True)
-    deb_path = os.path.join(out_dir, "liquid-devil-rgb_1.0.0-1_all.deb")
+    
+    version = get_git_version()
+    deb_path = os.path.join(out_dir, f"liquid-devil-rgb_{version}-1_all.deb")
 
     debian_binary = b"2.0\n"
 
-    control_content = """Package: liquid-devil-rgb
-Version: 1.0.0-1
+    control_content = f"""Package: liquid-devil-rgb
+Version: {version}-1
 Section: utils
 Priority: optional
 Architecture: all
@@ -55,7 +72,7 @@ from liquid_devil_rgb.cli import main
 if __name__ == '__main__':
     main()
 """.encode("utf-8")
-        
+
         ti = tarfile.TarInfo("./usr/bin/liquid-devil-rgb")
         ti.size = len(cli_launcher)
         ti.mode = 0o755

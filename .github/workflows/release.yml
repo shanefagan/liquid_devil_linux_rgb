@@ -18,6 +18,8 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install Astral uv & Python
         uses: astral-sh/setup-uv@v5
@@ -36,6 +38,8 @@ jobs:
       - name: Build Arch Linux (.pkg.tar.zst) Package
         run: |
           sudo apt-get update && sudo apt-get install -y libarchive-tools zstd
+          VERSION=$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || echo "1.0.0")
+
           mkdir -p build_arch
           cp -r src/liquid_devil_rgb build_arch/
           mkdir -p build_arch/usr/bin build_arch/usr/lib/python3/site-packages
@@ -48,13 +52,13 @@ jobs:
           EOF
           chmod +x build_arch/usr/bin/liquid-devil-rgb
 
-          # Create .PKGINFO
-          cat << 'EOF' > build_arch/.PKGINFO
+          # Create .PKGINFO dynamically
+          cat << EOF > build_arch/.PKGINFO
           pkgname = liquid-devil-rgb
-          pkgver = 1.0.0-1
+          pkgver = ${VERSION}-1
           pkgdesc = Linux I2C RGB Lighting Control for PowerColor Radeon RX 7900 XTX Liquid Devil
           url = https://github.com/shanefagan/liquid_devil_linux_rgb
-          builddate = 1722950000
+          builddate = $(date +%s)
           packager = Shane Fagan <shane@performativenonsense.com>
           size = 45000
           arch = any
@@ -66,16 +70,16 @@ jobs:
 
           cd build_arch
           bsdtar -czf .MTREE --format=mtree --options='!all,use-set,type,uid,gid,mode,time,size,md5,sha256,link' .PKGINFO usr
-          bsdtar -c --zstd -f ../dist/liquid-devil-rgb-1.0.0-1-any.pkg.tar.zst .PKGINFO .MTREE usr
+          bsdtar -c --zstd -f "../dist/liquid-devil-rgb-${VERSION}-1-any.pkg.tar.zst" .PKGINFO .MTREE usr
 
       - name: Display Built Artifacts
         run: |
           ls -la dist/
 
       - name: Create GitHub Release and Upload Packages
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.0
           files: |
             dist/*.whl
             dist/*.tar.gz

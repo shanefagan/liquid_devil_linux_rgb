@@ -1,10 +1,10 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [project]
 name = "liquid-devil-rgb"
-version = "1.0.0"
+dynamic = ["version"]
 description = "Linux I2C RGB Lighting Control for PowerColor Radeon RX 7900 XTX Liquid Devil"
 readme = "README.md"
 authors = [
@@ -27,6 +27,10 @@ dependencies = [
 
 [project.scripts]
 liquid-devil-rgb = "liquid_devil_rgb.cli:main"
+
+[tool.hatch.version]
+source = "vcs"
+fallback-version = "1.0.0"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/liquid_devil_rgb"]
