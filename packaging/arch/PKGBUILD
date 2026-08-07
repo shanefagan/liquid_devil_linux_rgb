@@ -1,14 +1,14 @@
 # Maintainer: Shane Fagan <shane@performativenonsense.com>
 
 pkgname=liquid-devil-rgb
-pkgver=1.0.0
+pkgver=1.3.0
 pkgrel=1
 pkgdesc="Linux I2C RGB Lighting Control for PowerColor Radeon RX 7900 XTX Liquid Devil"
 arch=('any')
 url="https://github.com/shanefagan/liquid_devil_linux_rgb"
 license=('MIT')
 depends=('python' 'python-click' 'i2c-tools')
-makedepends=('uv' 'python-hatch-vcs')
+makedepends=('uv' 'git')
 source=()
 
 pkgver() {
