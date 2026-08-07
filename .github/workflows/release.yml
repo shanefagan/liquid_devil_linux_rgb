@@ -35,6 +35,56 @@ jobs:
         run: |
           python3 packaging/build_deb.py
 
+      - name: Build RPM (.rpm) Package
+        run: |
+          sudo apt-get update && sudo apt-get install -y rpm
+          VERSION=$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || echo "1.0.0")
+
+          mkdir -p build_rpm/usr/bin build_rpm/usr/lib/python3/site-packages/liquid_devil_rgb build_rpm/usr/lib/systemd/system build_rpm/usr/share/doc/liquid-devil-rgb build_rpm/usr/share/licenses/liquid-devil-rgb
+          cp -r src/liquid_devil_rgb/* build_rpm/usr/lib/python3/site-packages/liquid_devil_rgb/
+          cp systemd/liquid-devil-sync.service build_rpm/usr/lib/systemd/system/
+          cp README.md PROTOCOL.md build_rpm/usr/share/doc/liquid-devil-rgb/
+          cp LICENSE build_rpm/usr/share/licenses/liquid-devil-rgb/
+
+          cat << 'EOF' > build_rpm/usr/bin/liquid-devil-rgb
+          #!/usr/bin/env python3
+          from liquid_devil_rgb.cli import main
+          if __name__ == '__main__':
+              main()
+          EOF
+          chmod +x build_rpm/usr/bin/liquid-devil-rgb
+
+          cat << EOF > liquid-devil-rgb.spec
+          Name:           liquid-devil-rgb
+          Version:        ${VERSION}
+          Release:        1
+          Summary:        Linux I2C RGB Lighting Control for PowerColor Radeon RX 7900 XTX Liquid Devil
+          License:        MIT
+          URL:            https://github.com/shanefagan/liquid_devil_linux_rgb
+          BuildArch:      noarch
+          Requires:       python3
+          Requires:       python3-click
+          Requires:       i2c-tools
+
+          %description
+          Reverse-engineered hardware protocol implementation for the PowerColor Radeon RX
+          7900 XTX Liquid Devil V2 I2C RGB microcontroller (0x22). Includes OpenRGB SDK
+          sync client for real-time PC lighting mirroring at 30 FPS.
+
+          %files
+          %license /usr/share/licenses/liquid-devil-rgb/LICENSE
+          %doc /usr/share/doc/liquid-devil-rgb/README.md
+          %doc /usr/share/doc/liquid-devil-rgb/PROTOCOL.md
+          /usr/bin/liquid-devil-rgb
+          /usr/lib/python3/site-packages/liquid_devil_rgb/
+          /usr/lib/systemd/system/liquid-devil-sync.service
+          EOF
+
+          mkdir -p ~/rpmbuild/SPECS
+          cp liquid-devil-rgb.spec ~/rpmbuild/SPECS/
+          rpmbuild -bb --buildroot $(pwd)/build_rpm ~/rpmbuild/SPECS/liquid-devil-rgb.spec
+          cp ~/rpmbuild/RPMS/noarch/*.rpm dist/
+
       - name: Build Arch Linux (.pkg.tar.zst) Package
         run: |
           sudo apt-get update && sudo apt-get install -y libarchive-tools zstd
@@ -52,7 +102,6 @@ jobs:
           EOF
           chmod +x build_arch/usr/bin/liquid-devil-rgb
 
-          # Create .PKGINFO dynamically
           cat << EOF > build_arch/.PKGINFO
           pkgname = liquid-devil-rgb
           pkgver = ${VERSION}-1
@@ -84,6 +133,7 @@ jobs:
             dist/*.whl
             dist/*.tar.gz
             dist/*.deb
+            dist/*.rpm
             dist/*.pkg.tar.zst
           generate_release_notes: true
         env:
