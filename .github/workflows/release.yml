@@ -90,10 +90,19 @@ jobs:
           sudo apt-get update && sudo apt-get install -y libarchive-tools zstd
           VERSION=$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || echo "1.0.0")
 
-          mkdir -p build_arch
-          cp -r src/liquid_devil_rgb build_arch/
-          mkdir -p build_arch/usr/bin build_arch/usr/lib/python3/site-packages
-          cp -r src/liquid_devil_rgb build_arch/usr/lib/python3/site-packages/
+          mkdir -p build_arch/usr/bin build_arch/usr/lib/systemd/system build_arch/usr/share/doc/liquid-devil-rgb build_arch/usr/share/licenses/liquid-devil-rgb
+          
+          # Copy site-packages for Python 3.14, 3.13, 3.12, 3.11, and generic python3
+          for pyver in 3.14 3.13 3.12 3.11 3; do
+            mkdir -p "build_arch/usr/lib/python${pyver}/site-packages"
+            cp -r src/liquid_devil_rgb "build_arch/usr/lib/python${pyver}/site-packages/"
+          done
+
+          # Systemd unit file & docs
+          cp systemd/liquid-devil-sync.service build_arch/usr/lib/systemd/system/
+          cp README.md PROTOCOL.md build_arch/usr/share/doc/liquid-devil-rgb/
+          cp LICENSE build_arch/usr/share/licenses/liquid-devil-rgb/
+
           cat << 'EOF' > build_arch/usr/bin/liquid-devil-rgb
           #!/usr/bin/env python3
           from liquid_devil_rgb.cli import main

@@ -38,7 +38,7 @@ def main():
     repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     out_dir = os.path.join(repo_root, "dist")
     os.makedirs(out_dir, exist_ok=True)
-    
+
     version = get_git_version()
     deb_path = os.path.join(out_dir, f"liquid-devil-rgb_{version}-1_all.deb")
 
@@ -89,15 +89,17 @@ if __name__ == '__main__':
                 ti.mode = 0o644
                 tar.addfile(ti, io.BytesIO(content))
 
-        # Systemd service unit
+        # Systemd service unit (install to both /lib/systemd/system and /usr/lib/systemd/system)
         svc_path = os.path.join(repo_root, "systemd", "liquid-devil-sync.service")
         if os.path.exists(svc_path):
             with open(svc_path, "rb") as f:
                 content = f.read()
-            ti = tarfile.TarInfo("./lib/systemd/system/liquid-devil-sync.service")
-            ti.size = len(content)
-            ti.mode = 0o644
-            tar.addfile(ti, io.BytesIO(content))
+
+            for target in ["./lib/systemd/system/liquid-devil-sync.service", "./usr/lib/systemd/system/liquid-devil-sync.service"]:
+                ti = tarfile.TarInfo(target)
+                ti.size = len(content)
+                ti.mode = 0o644
+                tar.addfile(ti, io.BytesIO(content))
 
         # Docs
         for docname in ["README.md", "PROTOCOL.md"]:

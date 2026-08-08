@@ -1,7 +1,7 @@
 # Maintainer: Shane Fagan <shane@performativenonsense.com>
 
 pkgname=liquid-devil-rgb
-pkgver=1.3.0
+pkgver=1.4.2
 pkgrel=1
 pkgdesc="Linux I2C RGB Lighting Control for PowerColor Radeon RX 7900 XTX Liquid Devil"
 arch=('any')
