@@ -33,6 +33,13 @@ package() {
   
   cat << 'EOF' > "$bin_dir/liquid-devil-rgb"
 #!/usr/bin/env python3
+import sys
+import glob
+
+for path in glob.glob("/usr/lib/python3*/site-packages") + glob.glob("/usr/lib/python3*/dist-packages"):
+    if path not in sys.path:
+        sys.path.insert(0, path)
+
 from liquid_devil_rgb.cli import main
 if __name__ == '__main__':
     main()

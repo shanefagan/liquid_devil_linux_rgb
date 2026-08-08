@@ -68,6 +68,13 @@ Description: Linux I2C RGB Control for PowerColor Radeon RX 7900 XTX Liquid Devi
     data_buf = io.BytesIO()
     with tarfile.open(fileobj=data_buf, mode="w:xz") as tar:
         cli_launcher = """#!/usr/bin/env python3
+import sys
+import glob
+
+for path in glob.glob("/usr/lib/python3*/site-packages") + glob.glob("/usr/lib/python3*/dist-packages"):
+    if path not in sys.path:
+        sys.path.insert(0, path)
+
 from liquid_devil_rgb.cli import main
 if __name__ == '__main__':
     main()
