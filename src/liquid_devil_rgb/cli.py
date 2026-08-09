@@ -3,7 +3,7 @@
 
 Reverse-engineered hardware protocol implementation for the V2 I2C RGB controller (0x22).
 Supports smbus2 with a seamless stdlib ctypes fallback when smbus2 is not installed.
-Includes real-time per-LED OpenRGB Effects Plugin and multi-device synchronization.
+Includes real-time system-wide ambient lighting and OpenRGB SDK sync.
 """
 
 from __future__ import annotations
@@ -428,17 +428,23 @@ def resolve_device_index(
 def run_openrgb_sync_client(
     host: str = "127.0.0.1",
     port: int = 6742,
-    device_query: str = "0",
+    device_query: str = "ambient",
     fps: int = 30,
     bus_path: str | None = None,
 ) -> None:
-    """Connect as a client to an OpenRGB SDK Server (port 6742) and mirror active colors to GPU."""
+    """Connect as a client to an OpenRGB SDK Server (port 6742) and sync ambient PC lighting or target device to GPU."""
     interval = 1.0 / max(1, min(60, fps))
-    device_idx = resolve_device_index(device_query, host, port)
+    is_ambient = device_query.lower() in ("ambient", "all", "system", "auto")
 
     print("PowerColor RX 7900 XTX Liquid Devil - OpenRGB Sync Client")
     print(f"Connecting to OpenRGB Server at {host}:{port}")
-    print(f"Target OpenRGB Device Index: {device_idx}")
+    if is_ambient:
+        print(
+            "Sync Mode: System-Wide Ambient Lighting (sampling all connected PC devices)"
+        )
+    else:
+        target_idx = resolve_device_index(device_query, host, port)
+        print(f"Sync Mode: Single Device Mirror (Target Index: {target_idx})")
     print(f"Sync Rate: ~{fps} FPS ({interval * 1000:.1f}ms interval)")
     print("Press Ctrl+C to stop sync daemon.\n")
 
@@ -453,85 +459,102 @@ def run_openrgb_sync_client(
 
                 name_bytes = b"Liquid Devil GPU Sync\x00"
                 name_payload = struct.pack("<H", len(name_bytes)) + name_bytes
-                hdr = struct.pack(
-                    "<4sIII",
-                    b"ORGB",
-                    0,
-                    NET_PACKET_TYPE_SET_CLIENT_NAME,
-                    len(name_payload),
+                s.sendall(
+                    struct.pack(
+                        "<4sIII",
+                        b"ORGB",
+                        0,
+                        NET_PACKET_TYPE_SET_CLIENT_NAME,
+                        len(name_payload),
+                    )
+                    + name_payload
                 )
-                s.sendall(hdr + name_payload)
 
                 print(f"Connected to OpenRGB Server at {host}:{port}")
 
                 while True:
-                    req_hdr = struct.pack(
-                        "<4sIII",
-                        b"ORGB",
-                        device_idx,
-                        NET_PACKET_TYPE_REQUEST_CONTROLLER_DATA,
-                        4,
-                    )
-                    s.sendall(req_hdr + struct.pack("<I", 3))
-
-                    resp_hdr = s.recv(16)
-                    if not resp_hdr or len(resp_hdr) < 16:
-                        break
-
-                    magic, _dev_id, pkt_t, pkt_len = struct.unpack("<4sIII", resp_hdr)
-                    if magic != b"ORGB" or pkt_len == 0:
-                        break
-
-                    payload = b""
-                    while len(payload) < pkt_len:
-                        chunk = s.recv(pkt_len - len(payload))
-                        if not chunk:
+                    if is_ambient:
+                        # Request device count
+                        s.sendall(struct.pack("<4sIII", b"ORGB", 0, 0, 0))
+                        hdr = s.recv(16)
+                        if not hdr or len(hdr) < 16:
                             break
-                        payload += chunk
+                        cnt_data = s.recv(4)
+                        if not cnt_data or len(cnt_data) < 4:
+                            break
+                        dev_count = struct.unpack("<I", cnt_data)[0]
 
-                    colors_data = b""
-                    stride = 3
+                        r_sum, g_sum, b_sum, active_leds = 0, 0, 0, 0
 
-                    if (
-                        pkt_t == NET_PACKET_TYPE_REQUEST_CONTROLLER_DATA
-                        and len(payload) >= 6
-                    ):
-                        # Extract colors array from controller payload tail
-                        # Protocol version 3/4 layout
+                        for idx in range(dev_count):
+                            s.sendall(
+                                struct.pack("<4sIII", b"ORGB", idx, 1, 4)
+                                + struct.pack("<I", 3)
+                            )
+                            resp_hdr = s.recv(16)
+                            if not resp_hdr or len(resp_hdr) < 16:
+                                continue
+                            _magic, _, _, pkt_len = struct.unpack("<4sIII", resp_hdr)
+                            payload = b""
+                            while len(payload) < pkt_len:
+                                chunk = s.recv(pkt_len - len(payload))
+                                if not chunk:
+                                    break
+                                payload += chunk
+
+                            stride = 4 if len(payload) > 500 else 3
+                            colors_data = payload[-min(len(payload), 64 * stride) :]
+                            num_colors = len(colors_data) // stride
+
+                            for i in range(num_colors):
+                                off = i * stride
+                                if off + 3 <= len(colors_data):
+                                    r, g, b = colors_data[off : off + 3]
+                                    if r > 0 or g > 0 or b > 0:
+                                        r_sum += r
+                                        g_sum += g
+                                        b_sum += b
+                                        active_leds += 1
+
+                        if active_leds > 0:
+                            dev.set_all_color(
+                                r_sum // active_leds,
+                                g_sum // active_leds,
+                                b_sum // active_leds,
+                            )
+                    else:
+                        target_idx = resolve_device_index(device_query, host, port)
+                        s.sendall(
+                            struct.pack("<4sIII", b"ORGB", target_idx, 1, 4)
+                            + struct.pack("<I", 3)
+                        )
+                        resp_hdr = s.recv(16)
+                        if not resp_hdr or len(resp_hdr) < 16:
+                            break
+                        _magic, _, _, pkt_len = struct.unpack("<4sIII", resp_hdr)
+                        payload = b""
+                        while len(payload) < pkt_len:
+                            chunk = s.recv(pkt_len - len(payload))
+                            if not chunk:
+                                break
+                            payload += chunk
+
                         stride = 4 if len(payload) > 500 else 3
-                        num_colors = len(payload) // stride
                         colors_data = payload[-min(len(payload), 17 * stride) :]
-
-                    elif pkt_t == NET_PACKET_TYPE_UPDATE_LEDS and len(payload) >= 6:
-                        colors_data = payload[6:]
-                        stride = 3
-
-                    elif (
-                        pkt_t == NET_PACKET_TYPE_UPDATE_ZONE_LEDS and len(payload) >= 10
-                    ):
-                        colors_data = payload[10:]
-                        stride = 3
-
-                    if colors_data:
-                        r_total, g_total, b_total = 0, 0, 0
-                        valid_colors = 0
                         num_colors = len(colors_data) // stride
+                        r_t, g_t, b_t, valid = 0, 0, 0, 0
 
                         for i in range(min(num_colors, 17)):
                             off = i * stride
                             if off + 3 <= len(colors_data):
                                 r, g, b = colors_data[off : off + 3]
-                                r_total += r
-                                g_total += g
-                                b_total += b
-                                valid_colors += 1
+                                r_t += r
+                                g_t += g
+                                b_t += b
+                                valid += 1
 
-                        if valid_colors > 0:
-                            dev.set_all_color(
-                                r_total // valid_colors,
-                                g_total // valid_colors,
-                                b_total // valid_colors,
-                            )
+                        if valid > 0:
+                            dev.set_all_color(r_t // valid, g_t // valid, b_t // valid)
 
                     time.sleep(interval)
 
@@ -827,8 +850,8 @@ def devices_cmd(host: str, port: int) -> None:
     "--device",
     "device_query",
     type=str,
-    default="0",
-    help="Target OpenRGB device index or name (e.g. 5, ASUS, iCUE, Mainboard)",
+    default="ambient",
+    help="Target OpenRGB device or 'ambient' for system-wide sync (default: ambient)",
 )
 @click.option(
     "--fps", type=int, default=30, help="Sync update frame rate (default: 30)"
