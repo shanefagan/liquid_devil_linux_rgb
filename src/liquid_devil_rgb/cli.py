@@ -3,7 +3,7 @@
 
 Reverse-engineered hardware protocol implementation for the V2 I2C RGB controller (0x22).
 Supports smbus2 with a seamless stdlib ctypes fallback when smbus2 is not installed.
-Includes real-time per-LED OpenRGB Effects Plugin synchronization.
+Includes real-time per-LED OpenRGB Effects Plugin and multi-device synchronization.
 """
 
 from __future__ import annotations
@@ -320,21 +320,125 @@ def parse_color_args(
     raise click.UsageError("Specify R G B values (0-255) or --hex color.")
 
 
+# --- OpenRGB SDK Helpers & Device Lister ---
+
+
+def fetch_openrgb_devices(
+    host: str = "127.0.0.1", port: int = 6742
+) -> list[dict[str, Any]]:
+    """Fetch list of all devices registered with the running OpenRGB SDK Server."""
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.settimeout(3.0)
+    devices = []
+    try:
+        s.connect((host, port))
+        name_bytes = b"DeviceLister\x00"
+        name_payload = struct.pack("<H", len(name_bytes)) + name_bytes
+        s.sendall(
+            struct.pack("<4sIII", b"ORGB", 0, 50, len(name_payload)) + name_payload
+        )
+
+        # Request count
+        s.sendall(struct.pack("<4sIII", b"ORGB", 0, 0, 0))
+        hdr = s.recv(16)
+        if not hdr or len(hdr) < 16:
+            return []
+        count_data = s.recv(4)
+        count = struct.unpack("<I", count_data)[0]
+
+        for idx in range(count):
+            s.sendall(struct.pack("<4sIII", b"ORGB", idx, 1, 4) + struct.pack("<I", 3))
+            hdr = s.recv(16)
+            if not hdr or len(hdr) < 16:
+                continue
+            _magic, _, _, pkt_len = struct.unpack("<4sIII", hdr)
+            payload = b""
+            while len(payload) < pkt_len:
+                chunk = s.recv(pkt_len - len(payload))
+                if not chunk:
+                    break
+                payload += chunk
+
+            offset = 8
+            parsed_strings: list[str] = []
+
+            for _ in range(3):
+                if offset + 2 <= len(payload):
+                    length = struct.unpack_from("<H", payload, offset)[0]
+                    offset += 2
+                    if length > 0 and offset + length <= len(payload):
+                        st = (
+                            payload[offset : offset + length]
+                            .decode("utf-8", errors="ignore")
+                            .rstrip("\x00")
+                        )
+                        parsed_strings.append(st)
+                        offset += length
+                    else:
+                        parsed_strings.append("")
+                else:
+                    parsed_strings.append("")
+
+            name = parsed_strings[0] if len(parsed_strings) > 0 else "Unknown"
+            vendor = parsed_strings[1] if len(parsed_strings) > 1 else ""
+            desc = parsed_strings[2] if len(parsed_strings) > 2 else ""
+
+            devices.append(
+                {
+                    "index": idx,
+                    "name": name,
+                    "vendor": vendor,
+                    "description": desc,
+                }
+            )
+    except OSError:
+        pass
+    finally:
+        s.close()
+    return devices
+
+
+def resolve_device_index(
+    device_query: str, host: str = "127.0.0.1", port: int = 6742
+) -> int:
+    """Resolve device index from an integer string or name substring."""
+    if device_query.isdigit():
+        return int(device_query)
+
+    devices = fetch_openrgb_devices(host, port)
+    query = device_query.lower()
+    for dev in devices:
+        full_str = f"{dev['vendor']} {dev['name']} {dev['description']}".lower()
+        if query in full_str:
+            print(
+                f"Matched device query '{device_query}' to Index {dev['index']}: [{dev['vendor']}] {dev['name']}"
+            )
+            return dev["index"]
+
+    print(
+        f"Warning: Could not match device query '{device_query}'. Defaulting to index 0.",
+        file=sys.stderr,
+    )
+    return 0
+
+
 # --- OpenRGB SDK Client Sync Module ---
 
 
 def run_openrgb_sync_client(
     host: str = "127.0.0.1",
     port: int = 6742,
-    device_idx: int = 0,
+    device_query: str = "0",
     fps: int = 30,
     bus_path: str | None = None,
 ) -> None:
     """Connect as a client to an OpenRGB SDK Server (port 6742) and mirror active colors to GPU."""
     interval = 1.0 / max(1, min(60, fps))
+    device_idx = resolve_device_index(device_query, host, port)
+
     print("PowerColor RX 7900 XTX Liquid Devil - OpenRGB Sync Client")
     print(f"Connecting to OpenRGB Server at {host}:{port}")
-    print(f"Target Device Index: {device_idx}")
+    print(f"Target OpenRGB Device Index: {device_idx}")
     print(f"Sync Rate: ~{fps} FPS ({interval * 1000:.1f}ms interval)")
     print("Press Ctrl+C to stop sync daemon.\n")
 
@@ -385,16 +489,18 @@ def run_openrgb_sync_client(
                             break
                         payload += chunk
 
-                    # Parse incoming packet (either REQUEST_CONTROLLER_DATA or UPDATE_LEDS / UPDATE_ZONE_LEDS)
                     colors_data = b""
                     stride = 3
 
                     if (
                         pkt_t == NET_PACKET_TYPE_REQUEST_CONTROLLER_DATA
-                        and len(payload) >= 4
+                        and len(payload) >= 6
                     ):
-                        colors_data = payload[-68:]  # Last 68 bytes
-                        stride = 4
+                        # Extract colors array from controller payload tail
+                        # Protocol version 3/4 layout
+                        stride = 4 if len(payload) > 500 else 3
+                        num_colors = len(payload) // stride
+                        colors_data = payload[-min(len(payload), 17 * stride) :]
 
                     elif pkt_t == NET_PACKET_TYPE_UPDATE_LEDS and len(payload) >= 6:
                         colors_data = payload[6:]
@@ -572,68 +678,61 @@ def handle_sdk_client(
                     except (struct.error, UnicodeDecodeError):
                         pass
 
-            elif pkt_type == NET_PACKET_TYPE_UPDATE_LEDS:
-                # Payload: [buffer_size (4B)][num_colors (2B)][color_structs...]
-                if len(payload) >= 6:
-                    num_colors = struct.unpack("<H", payload[4:6])[0]
-                    colors_data = payload[6:]
-                    stride = 4 if protocol_version >= 4 else 3
+            elif pkt_type == NET_PACKET_TYPE_UPDATE_LEDS and len(payload) >= 6:
+                num_colors = struct.unpack("<H", payload[4:6])[0]
+                colors_data = payload[6:]
+                stride = 4 if protocol_version >= 4 else 3
 
-                    # Stream individual LED colors or calculate master color
-                    if num_colors >= 17:
-                        for i in range(17):
-                            off = i * stride
-                            if off + 3 <= len(colors_data):
-                                r, g, b = colors_data[off : off + 3]
-                                dev.write_raw(26 + i, [r, g, b])
-                        dev.set_settings(1, 255, 255)
-                    else:
-                        r_t, g_t, b_t, valid = 0, 0, 0, 0
-                        for i in range(num_colors):
-                            off = i * stride
-                            if off + 3 <= len(colors_data):
-                                r, g, b = colors_data[off : off + 3]
-                                r_t += r
-                                g_t += g
-                                b_t += b
-                                valid += 1
-                        if valid > 0:
-                            dev.set_all_color(r_t // valid, g_t // valid, b_t // valid)
+                if num_colors >= 17:
+                    for i in range(17):
+                        off = i * stride
+                        if off + 3 <= len(colors_data):
+                            r, g, b = colors_data[off : off + 3]
+                            dev.write_raw(26 + i, [r, g, b])
+                    dev.set_settings(1, 255, 255)
+                else:
+                    r_t, g_t, b_t, valid = 0, 0, 0, 0
+                    for i in range(num_colors):
+                        off = i * stride
+                        if off + 3 <= len(colors_data):
+                            r, g, b = colors_data[off : off + 3]
+                            r_t += r
+                            g_t += g
+                            b_t += b
+                            valid += 1
+                    if valid > 0:
+                        dev.set_all_color(r_t // valid, g_t // valid, b_t // valid)
 
-            elif pkt_type == NET_PACKET_TYPE_UPDATE_ZONE_LEDS:
-                # Payload: [buffer_size (4B)][zone_index (4B)][num_colors (2B)][color_structs...]
-                if len(payload) >= 10:
-                    num_colors = struct.unpack("<H", payload[8:10])[0]
-                    colors_data = payload[10:]
-                    stride = 4 if protocol_version >= 4 else 3
+            elif pkt_type == NET_PACKET_TYPE_UPDATE_ZONE_LEDS and len(payload) >= 10:
+                num_colors = struct.unpack("<H", payload[8:10])[0]
+                colors_data = payload[10:]
+                stride = 4 if protocol_version >= 4 else 3
 
-                    if num_colors >= 17:
-                        for i in range(17):
-                            off = i * stride
-                            if off + 3 <= len(colors_data):
-                                r, g, b = colors_data[off : off + 3]
-                                dev.write_raw(26 + i, [r, g, b])
-                        dev.set_settings(1, 255, 255)
-                    else:
-                        r_t, g_t, b_t, valid = 0, 0, 0, 0
-                        for i in range(num_colors):
-                            off = i * stride
-                            if off + 3 <= len(colors_data):
-                                r, g, b = colors_data[off : off + 3]
-                                r_t += r
-                                g_t += g
-                                b_t += b
-                                valid += 1
-                        if valid > 0:
-                            dev.set_all_color(r_t // valid, g_t // valid, b_t // valid)
+                if num_colors >= 17:
+                    for i in range(17):
+                        off = i * stride
+                        if off + 3 <= len(colors_data):
+                            r, g, b = colors_data[off : off + 3]
+                            dev.write_raw(26 + i, [r, g, b])
+                    dev.set_settings(1, 255, 255)
+                else:
+                    r_t, g_t, b_t, valid = 0, 0, 0, 0
+                    for i in range(num_colors):
+                        off = i * stride
+                        if off + 3 <= len(colors_data):
+                            r, g, b = colors_data[off : off + 3]
+                            r_t += r
+                            g_t += g
+                            b_t += b
+                            valid += 1
+                    if valid > 0:
+                        dev.set_all_color(r_t // valid, g_t // valid, b_t // valid)
 
-            elif pkt_type == NET_PACKET_TYPE_UPDATE_SINGLE_LED:
-                # Payload: [buffer_size (4B)][led_index (4B)][r (1B)][g (1B)][b (1B)]
-                if len(payload) >= 11:
-                    led_idx = struct.unpack("<I", payload[4:8])[0]
-                    r, g, b = payload[8:11]
-                    if 0 <= led_idx <= 16:
-                        dev.set_led_color(led_idx, r, g, b)
+            elif pkt_type == NET_PACKET_TYPE_UPDATE_SINGLE_LED and len(payload) >= 11:
+                led_idx = struct.unpack("<I", payload[4:8])[0]
+                r, g, b = payload[8:11]
+                if 0 <= led_idx <= 16:
+                    dev.set_led_color(led_idx, r, g, b)
 
     except (TimeoutError, ConnectionResetError, BrokenPipeError, OSError):
         pass
@@ -643,7 +742,7 @@ def handle_sdk_client(
 
 
 def run_sdk_server(
-    host: str = "127.0.0.1", port: int = 6742, bus_path: str | None = None
+    host: str = "0.0.0.0", port: int = 6742, bus_path: str | None = None
 ) -> None:
     """Run OpenRGB SDK Server daemon listening on specified host/port."""
     server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -688,6 +787,29 @@ def cli(ctx: click.Context, bus: str | None) -> None:
     ctx.obj["bus"] = bus
 
 
+@cli.command("devices")
+@click.option(
+    "--host",
+    type=str,
+    default="127.0.0.1",
+    help="OpenRGB server IP (default: 127.0.0.1)",
+)
+@click.option(
+    "--port", type=int, default=6742, help="OpenRGB server port (default: 6742)"
+)
+def devices_cmd(host: str, port: int) -> None:
+    """List all RGB devices connected to the running OpenRGB SDK Server."""
+    devs = fetch_openrgb_devices(host, port)
+    if not devs:
+        print(f"No OpenRGB devices found or failed to connect to {host}:{port}")
+        return
+    print(f"Found {len(devs)} OpenRGB Devices:")
+    for d in devs:
+        print(
+            f"  [{d['index']:2d}] Vendor='{d['vendor']}' Name='{d['name']}' ({d['description']})"
+        )
+
+
 @cli.command("openrgb-sync")
 @click.option(
     "--host",
@@ -702,23 +824,24 @@ def cli(ctx: click.Context, bus: str | None) -> None:
     help="OpenRGB server port (default: 6742)",
 )
 @click.option(
-    "--device-idx",
-    type=int,
-    default=0,
-    help="Target OpenRGB device index to mirror (default: 0)",
+    "--device",
+    "device_query",
+    type=str,
+    default="0",
+    help="Target OpenRGB device index or name (e.g. 5, ASUS, iCUE, Mainboard)",
 )
 @click.option(
     "--fps", type=int, default=30, help="Sync update frame rate (default: 30)"
 )
 @click.pass_context
 def openrgb_sync_cmd(
-    ctx: click.Context, host: str, port: int, device_idx: int, fps: int
+    ctx: click.Context, host: str, port: int, device_query: str, fps: int
 ) -> None:
     """Sync GPU colors in real-time by connecting as a client to an OpenRGB Server."""
     run_openrgb_sync_client(
         host=host,
         port=port,
-        device_idx=device_idx,
+        device_query=device_query,
         fps=fps,
         bus_path=ctx.obj["bus"],
     )
