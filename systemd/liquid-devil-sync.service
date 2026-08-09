@@ -1,12 +1,17 @@
 [Unit]
 Description=PowerColor Liquid Devil 7900 XTX OpenRGB Sync Daemon
-After=network.target
+After=network.target openrgb.service
+Wants=openrgb.service
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/liquid-devil-rgb openrgb-sync
+Environment=OPENRGB_DEVICE=ambient
+Environment=OPENRGB_HOST=127.0.0.1
+Environment=OPENRGB_PORT=6742
+Environment=OPENRGB_FPS=30
+ExecStart=/usr/bin/liquid-devil-rgb openrgb-sync --device ${OPENRGB_DEVICE} --host ${OPENRGB_HOST} --port ${OPENRGB_PORT} --fps ${OPENRGB_FPS}
 Restart=always
-RestartSec=3
+RestartSec=3s
 
 [Install]
 WantedBy=multi-user.target

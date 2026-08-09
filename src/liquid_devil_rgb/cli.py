@@ -523,7 +523,6 @@ def run_openrgb_sync_client(
                                 b_sum // active_leds,
                             )
                     else:
-                        target_idx = resolve_device_index(device_query, host, port)
                         s.sendall(
                             struct.pack("<4sIII", b"ORGB", target_idx, 1, 4)
                             + struct.pack("<I", 3)
@@ -838,23 +837,30 @@ def devices_cmd(host: str, port: int) -> None:
     "--host",
     type=str,
     default="127.0.0.1",
-    help="OpenRGB server IP (default: 127.0.0.1)",
+    envvar="OPENRGB_HOST",
+    help="OpenRGB server IP (default: 127.0.0.1 or OPENRGB_HOST env)",
 )
 @click.option(
     "--port",
     type=int,
     default=6742,
-    help="OpenRGB server port (default: 6742)",
+    envvar="OPENRGB_PORT",
+    help="OpenRGB server port (default: 6742 or OPENRGB_PORT env)",
 )
 @click.option(
     "--device",
     "device_query",
     type=str,
     default="ambient",
-    help="Target OpenRGB device or 'ambient' for system-wide sync (default: ambient)",
+    envvar="OPENRGB_DEVICE",
+    help="Target OpenRGB device or 'ambient' for system-wide sync (default: ambient or OPENRGB_DEVICE env)",
 )
 @click.option(
-    "--fps", type=int, default=30, help="Sync update frame rate (default: 30)"
+    "--fps",
+    type=int,
+    default=30,
+    envvar="OPENRGB_FPS",
+    help="Sync update frame rate (default: 30 or OPENRGB_FPS env)",
 )
 @click.pass_context
 def openrgb_sync_cmd(
